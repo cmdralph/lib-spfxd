@@ -93,54 +93,42 @@ fit(lambda x: (mp.expm1(x) - x - x * x / 2) / x**3 if x != 0 else mpf(1) / 6,
     -r, r, 4, "__expm1_poly", "(expm1(r) - r - r^2/2) / r^3")
 
 # ---------------------------------------------------------------- log
-# 128 intervals of m in [0.75, 1.5): index from the top 7 mantissa bits
-# after biasing by 0.75.  inv_i ~ 1/center with 20 significant bits; the
-# two intervals adjacent to 1.0 use inv = 1 exactly.
+# The argument is normalized to m in [0.75, 1.5) by subtracting the bit
+# pattern of 0.75 from the bit pattern of x: the integer exponent comes
+# from the top bits of the difference and the index i from its next 7
+# bits.  Interval i is [0.75 + i/256, 0.75 + (i+1)/256) for i < 64 and
+# [1 + (i-64)/128, 1 + (i-63)/128) for i >= 64.  inv_i ~ 1/center; the two
+# intervals touching 1.0 use inv = 1 so that log is exactly log1p(m - 1)
+# there (no cancellation for x near 1).
 emit("")
 emit("/* log tables: inverse centers and -log(inverse) as double-double */")
 invs, logc = [], []
-off = mpf("0.75")
-import struct
-def bits(x): return struct.unpack("<Q", struct.pack("<d", x))[0]
-def frombits(b): return struct.unpack("<d", struct.pack("<Q", b))[0]
-OFF = bits(0.75)
 max_r = mpf(0)
 for i in range(128):
-    # interval i: mantissa bits of (u - OFF) top 7 bits == i
-    lo_b = OFF + (i << 45)
-    lo = mpf(frombits(lo_b if (lo_b >> 52) == (OFF >> 52) else lo_b))
-    # u - OFF top 7 bits index; reconstruct interval endpoints
-    t0 = (i << 45)
-    t1 = ((i + 1) << 45)
-    a = mpf(frombits(OFF + t0)) if True else None
-    # translate back to [0.75, 1.5) by removing the exponent carry
-    def norm(u):
-        tmp = u - OFF
-        k = tmp >> 52 if tmp >= 0 else -((-tmp + (1 << 52) - 1) >> 52)
-        return frombits(u - (k << 52))
-    A = mpf(norm(OFF + t0))
-    B = mpf(norm(OFF + t1 - 1))
-    c = (A + B) / 2
-    if A <= 1 <= B or (abs(B - 1) < mpf(2)**-6 and B < 1) or (abs(A - 1) < mpf(2)**-6 and A > 1 and A - 1 < mpf("0.008")):
+    if i < 64:
+        A = mpf("0.75") + mpf(i) / 256; B = A + mpf(1) / 256
+    else:
+        A = 1 + mpf(i - 64) / 128; B = A + mpf(1) / 128
+    if i in (63, 64):
         inv = mpf(1)
     else:
-        inv = trunc_bits(1 / c, 20)
+        inv = trunc_bits(2 / (A + B), 24)
     invs.append(float(inv))
-    lc = -mp.log(mpf(float(inv)))
-    h, l = dd(lc)
+    h, l = dd(-mp.log(inv))
     logc += [h, l]
     for x in (A, B):
-        max_r = max(max_r, abs(x * mpf(float(inv)) - 1))
+        max_r = max(max_r, abs(x * inv - 1))
 arr("__log_inv", invs, per=4)
 arr("__log_logc", logc, per=2)
 print("log: max |r| = %.5g" % float(max_r))
 lnh = trunc_bits(ln2, 42)
 emit("hidden const double __log_ln2[2] = { %s, %s };" % (hexd(lnh), hexd(ln2 - lnh)))
-rm = max_r * mpf("1.05")
+rm = max_r * mpf("1.02")
 fit(lambda x: (mp.log1p(x) - x + x * x / 2) / x**3 if x != 0 else mpf(1) / 3,
-    -rm, rm, 5, "__log1p_poly", "(log1p(r) - r + r^2/2) / r^3")
+    -rm, rm, 7, "__log1p_poly", "(log1p(r) - r + r^2/2) / r^3")
 for name, val in (("__inv_ln2", 1 / ln2), ("__inv_ln10", 1 / mp.log(10)),
-                  ("__ln10", mp.log(10)), ("__log2_10", mp.log(10, 2)), ("__ln2", ln2)):
+                  ("__ln10", mp.log(10)), ("__log2_10", mp.log(10, 2)), ("__ln2", ln2),
+                  ("__log10_2", mp.log10(2))):
     h, l = dd(val)
     emit("hidden const double %s[2] = { %s, %s };" % (name, hexd(h), hexd(l)))
 
@@ -163,20 +151,22 @@ emit("hidden const double __pio2_dd[2] = { %s, %s };" % (hexd(h), hexd(l)))
 h, l = dd(mp.pi)
 emit("hidden const double __pi_dd[2] = { %s, %s };" % (hexd(h), hexd(l)))
 emit("hidden const double __two_over_pi = %s;" % hexd(2 / mp.pi))
-# bits of 2/pi: 24 words of 64 bits after the binary point (1536 bits)
-mp.mp.dps = 600
+# bits of 2/pi: 264 words of 64 bits after the binary point (16896 bits),
+# enough for Payne-Hanek reduction of the largest long double
+NW = 264
+mp.mp.dps = 5200
 tp = 2 / mp.pi
 words = []
 x = tp
-for i in range(24):
+for i in range(NW):
     x *= mpf(2)**64
     w = int(mp.floor(x))
     words.append(w)
     x -= w
 mp.mp.dps = 60
-emit("/* 2/pi = 0.b0 b1 b2 ... with b_i the 64-bit words below (1536 bits) */")
-emit("hidden const uint64_t __two_over_pi_bits[24] = {")
-for i in range(0, 24, 3):
+emit("/* 2/pi = 0.w0 w1 w2 ... with w_i the 64-bit words below */")
+emit("hidden const uint64_t __two_over_pi_bits[%d] = {" % NW)
+for i in range(0, NW, 3):
     emit("\t" + ", ".join("0x%016xULL" % w for w in words[i:i + 3]) + ",")
 emit("};")
 
@@ -203,40 +193,52 @@ emit("")
 fit(lambda x: (mp.erf(mp.sqrt(x)) / mp.sqrt(x)) if x != 0 else 2 / mp.sqrt(mp.pi),
     mpf(0), mpf("0.84375")**2, 11, "__erf_poly", "erf(x)/x in z = x^2, |x| <= 0.84375")
 # erfc(x) = exp(-x^2) * R(x); fit R on pieces in t = 1/x (for x >= 2) or x
-pieces = [(mpf("0.84375"), mpf("1.25"), 14), (mpf("1.25"), mpf("2"), 15), (mpf("2"), mpf("3"), 15),
-          (mpf("3"), mpf("4.5"), 16), (mpf("4.5"), mpf("6.5"), 16), (mpf("6.5"), mpf("10"), 14),
-          (mpf("10"), mpf("28"), 10)]
-emit("/* erfc(x) = exp(-x^2) * P_k(x - a_k) on [a_k, b_k) */")
+pieces = [(mpf("0"), mpf("0.40625"), 14), (mpf("0.40625"), mpf("0.84375"), 15), (mpf("0.84375"), mpf("1.25"), 14),
+          (mpf("1.25"), mpf("2"), 15), (mpf("2"), mpf("3"), 15),
+          (mpf("3"), mpf("4.5"), 16), (mpf("4.5"), mpf("5.5"), 16), (mpf("5.5"), mpf("6.5"), 16)]
+emit("/* erfc(x) = exp(-x^2) * P_k(x - a_k) on [a_k, a_k+1) */")
 emit("hidden const double __erfc_bounds[%d] = { %s };" % (len(pieces) + 1,
      ", ".join([hexd(p[0]) for p in pieces] + [hexd(pieces[-1][1])])))
 emit("hidden const int __erfc_degree[%d] = { %s };" % (len(pieces), ", ".join(str(p[2]) for p in pieces)))
 allc = []
 starts = []
+los = []
 for (a, b, n) in pieces:
     f = (lambda a_: (lambda t: mp.erfc(t + a_) * mp.exp((t + a_)**2)))(a)
     starts.append(len(allc))
     coeffs, err = mp.chebyfit(f, [0, b - a], n + 1, error=True)
     coeffs = coeffs[::-1]
     rc = [float(c) for c in coeffs]
+    # the two leading coefficients are stored as double-doubles
+    lo0, lo1 = float(coeffs[0] - rc[0]), float(coeffs[1] - rc[1])
+    los += [lo0, lo1]
+    ec = [mpf(rc[0]) + lo0, mpf(rc[1]) + lo1] + [mpf(c) for c in rc[2:]]
     worst = mpf(0)
     for i in range(801):
         t = (b - a) * i / 800
         fx = f(t)
         px = mpf(0)
-        for c in reversed(rc): px = px * t + c
+        for c in reversed(ec): px = px * t + c
         worst = max(worst, abs((px - fx) / fx))
     print("erfc piece [%s,%s] deg %d rel err %.3e" % (mp.nstr(a, 5), mp.nstr(b, 5), n, float(worst)))
     allc += rc
 emit("hidden const int __erfc_start[%d] = { %s };" % (len(pieces), ", ".join(str(s) for s in starts)))
 arr("__erfc_coef", allc, per=3)
+emit("/* low parts of the two leading coefficients of each piece */")
+arr("__erfc_lo", los, per=2)
+# x >= 6.5: erfc(x) = exp(-x^2) / x * G(1/x^2)
+def G(u):
+    x = 1 / mp.sqrt(u)
+    return x * mp.erfc(x) * mp.exp(x * x)
+fit(G, 1 / mpf("27.5")**2, 1 / mpf("6.5")**2, 14, "__erfc_asym", "x erfc(x) exp(x^2) in u = 1/x^2, 6.5 <= x <= 27.5")
 
 # ---------------------------------------------------------------- lgamma
 emit("")
 euler = mp.euler
 fit(lambda t: mp.loggamma(1 + t) / t if t != 0 else -euler,
-    mpf("-0.25"), mpf("0.25"), 18, "__lgamma1_poly", "lgamma(1+t)/t, |t| <= 0.25")
+    mpf("-0.25"), mpf("0.25"), 20, "__lgamma1_poly", "lgamma(1+t)/t, |t| <= 0.25")
 fit(lambda t: mp.loggamma(2 + t) / t if t != 0 else 1 - euler,
-    mpf("-0.75"), mpf("0.75"), 24, "__lgamma2_poly", "lgamma(2+t)/t, |t| <= 0.75")
+    mpf("-0.75"), mpf("0.75"), 27, "__lgamma2_poly", "lgamma(2+t)/t, |t| <= 0.75")
 # Stirling series coefficients B_2k / (2k (2k-1)), k = 1..10
 st = [mp.bernoulli(2 * k) / (2 * k * (2 * k - 1)) for k in range(1, 11)]
 arr("__stirling", st, per=3)
@@ -245,6 +247,12 @@ emit("hidden const double __half_log_2pi[2] = { %s, %s };" % (hexd(h), hexd(l)))
 h, l = dd(mp.log(mp.pi))
 emit("hidden const double __log_pi[2] = { %s, %s };" % (hexd(h), hexd(l)))
 emit("hidden const double __euler_gamma = %s;" % hexd(euler))
+h, l = dd(euler)
+emit("hidden const double __euler_dd[2] = { %s, %s };" % (hexd(h), hexd(l)))
+h, l = dd(2 / mp.pi)
+emit("hidden const double __two_over_pi_dd[2] = { %s, %s };" % (hexd(h), hexd(l)))
+h, l = dd(1 / mp.pi)
+emit("hidden const double __inv_pi_dd[2] = { %s, %s };" % (hexd(h), hexd(l)))
 h, l = dd(2 / mp.sqrt(mp.pi))
 emit("hidden const double __two_over_sqrtpi[2] = { %s, %s };" % (hexd(h), hexd(l)))
 h, l = dd(1 / mp.sqrt(mp.pi))
@@ -254,30 +262,52 @@ emit("hidden const double __sqrt_2_over_pi[2] = { %s, %s };" % (hexd(h), hexd(l)
 
 # ---------------------------------------------------------------- long double
 emit("")
-emit("/* long double constants (x87 extended) as decimal literals with 21 digits */")
-def ldlit(x):
-    return mp.nstr(x, 25, strip_zeros=False) + "L"
+emit("/* long double (x87 extended, 64-bit significand) constants as hex literals */")
 mp.mp.dps = 80
-pio2 = mp.pi / 2
-# pi/2 split into 32-bit pieces for long double reduction
+def ext(x):
+    """Round to a 64-bit significand (nearest)."""
+    with mp.workprec(64):
+        return +x
+def ldhex(x):
+    x = ext(x)
+    if x == 0: return "0.0L"
+    sign = "-" if x < 0 else ""
+    man, e = mp.mpf(abs(x)).man_exp
+    return "%s0x%xp%dL" % (sign, int(man), int(e))
+def ldd(x):
+    h = ext(x)
+    return h, ext(x - h)
 def trunc_bits80(x, bits):
     m, e = mp.frexp(x)
     m = mp.floor(m * 2**bits) / 2**bits
     return mp.ldexp(m, e)
+pio2 = mp.pi / 2
+# pi/2 in 32-bit pieces: n * piece is exact for |n| < 2^32
 q1 = trunc_bits80(pio2, 32)
 q2 = trunc_bits80(pio2 - q1, 32)
 q3 = trunc_bits80(pio2 - q1 - q2, 32)
 q4 = pio2 - q1 - q2 - q3
-emit("hidden const long double __pio2l_split[4] = { %s, %s, %s, %s };" % (ldlit(q1), ldlit(q2), ldlit(q3), ldlit(q4)))
-emit("hidden const long double __two_over_pil = %s;" % ldlit(2 / mp.pi))
-emit("hidden const long double __pio2l = %s;" % ldlit(pio2))
-emit("hidden const long double __pio2l_lo = %s;" % ldlit(pio2 - mpf(mp.nstr(pio2, 25))))
-lg2e = 1 / mp.log(2)
-e_hi = trunc_bits80(lg2e, 32)
-emit("hidden const long double __log2el[2] = { %s, %s };" % (ldlit(e_hi), ldlit(lg2e - e_hi)))
-l10 = mp.log(10, 2)
-t_hi = trunc_bits80(l10, 32)
-emit("hidden const long double __log2_10l[2] = { %s, %s };" % (ldlit(t_hi), ldlit(l10 - t_hi)))
+emit("hidden const long double __pio2l_split[4] = { %s, %s, %s, %s };" % (ldhex(q1), ldhex(q2), ldhex(q3), ldhex(q4)))
+h, l = ldd(pio2)
+emit("hidden const long double __pio2l_dd[2] = { %s, %s };" % (ldhex(h), ldhex(l)))
+h, l = ldd(mp.pi)
+emit("hidden const long double __pil_dd[2] = { %s, %s };" % (ldhex(h), ldhex(l)))
+emit("hidden const long double __two_over_pil = %s;" % ldhex(2 / mp.pi))
+h, l = ldd(1 / mp.log(2))
+emit("hidden const long double __log2el[2] = { %s, %s };" % (ldhex(h), ldhex(l)))
+h, l = ldd(mp.log(10, 2))
+emit("hidden const long double __log2_10l[2] = { %s, %s };" % (ldhex(h), ldhex(l)))
+h, l = ldd(mp.log(2))
+emit("hidden const long double __ln2l[2] = { %s, %s };" % (ldhex(h), ldhex(l)))
+h, l = ldd(mp.log10(2))
+emit("hidden const long double __log10_2l[2] = { %s, %s };" % (ldhex(h), ldhex(l)))
+# 2^(-j/64), j = -32..32, as extended double-double (for powl)
+emit("/* 2^(-j/64) for j = -32..32 as (hi, lo) extended pairs, index j + 32 */")
+emit("hidden const long double __exp2l_tab[130] = {")
+for j in range(-32, 33):
+    h, l = ldd(mp.power(2, -mpf(j) / 64))
+    emit("\t%s, %s," % (ldhex(h), ldhex(l)))
+emit("};")
 
 open("src/math/math_data.c", "w").write("\n".join(out) + "\n")
 print("wrote src/math/math_data.c")

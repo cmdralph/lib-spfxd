@@ -106,6 +106,24 @@ long double nanl(const char *);
 double nexttoward(double, long double);
 float nexttowardf(float, long double);
 long double nexttowardl(long double, long double);
+#if __STDC_VERSION__ >= 202311L || defined(__SPFXD_GNU)
+__SPFXD_M1(roundeven)
+#endif
+int __fpclassify(double);
+int __fpclassifyf(float);
+int __fpclassifyl(long double);
+int __signbit(double);
+int __signbitf(float);
+int __signbitl(long double);
+int __isinf(double);
+int __isinff(float);
+int __isinfl(long double);
+int __isnan(double);
+int __isnanf(float);
+int __isnanl(long double);
+int __finite(double);
+int __finitef(float);
+int __finitel(long double);
 double fma(double, double, double);
 float fmaf(float, float, float);
 long double fmal(long double, long double, long double);
@@ -153,6 +171,12 @@ float jnf(int, float);
 float y0f(float);
 float y1f(float);
 float ynf(int, float);
+long double dreml(long double, long double);
+int finitel(long double);
+long double significandl(long double);
+double gamma(double);
+float gammaf(float);
+long double gammal(long double);
 #endif
 
 #if defined(__SPFXD_GNU)
@@ -173,6 +197,12 @@ void sincos(double, double *, double *);
 void sincosf(float, float *, float *);
 void sincosl(long double, long double *, long double *);
 __SPFXD_M1(exp10)
+long double j0l(long double);
+long double j1l(long double);
+long double jnl(int, long double);
+long double y0l(long double);
+long double y1l(long double);
+long double ynl(int, long double);
 double pow10(double);
 float pow10f(float);
 long double pow10l(long double);
