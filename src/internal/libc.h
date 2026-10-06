@@ -68,6 +68,8 @@ void __cxa_finalize(void *);
 void __stack_chk_fail(void);
 hidden void __stack_chk_fail_local(void);
 hidden void __tls_layout_finish(size_t max_offset);
+hidden void __init_tls_dynamic(void);
+void *__tls_get_addr(size_t *);
 
 hidden void __init_libc(char **envp, char *progname);
 hidden void __init_tls(size_t *aux);

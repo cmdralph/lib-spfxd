@@ -113,6 +113,7 @@ hidden void __fork_handler(int);
 hidden void __malloc_atfork(int);
 hidden void __stdio_atfork(int);
 hidden void __ldso_atfork(int);
+hidden void __tls_thread_exit(struct pthread *);
 
 #define DEFAULT_STACK_SIZE (2 << 20)
 #define DEFAULT_GUARD_SIZE 4096

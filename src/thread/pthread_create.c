@@ -31,6 +31,7 @@ static void dummy_tcache(struct pthread *self) { }
 weak_alias(dummy_tcache, __malloc_thread_exit);
 static void dummy_void(void) { }
 weak_alias(dummy_void, __pthread_tsd_run_dtors);
+weak_alias(dummy_tcache, __tls_thread_exit);
 
 static int start(void *arg)
 {
@@ -141,6 +142,7 @@ hidden void __pthread_exit_internal(void *result)
 		c->__fn(c->__arg);
 	}
 	__pthread_tsd_run_dtors();
+	__tls_thread_exit(self);
 	__malloc_thread_exit(self);
 
 	__tl_lock();

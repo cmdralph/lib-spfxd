@@ -59,6 +59,26 @@ hidden void __tls_layout_finish(size_t max_offset)
 	__libc.tls_size = (__libc.tls_size + 15) & -16UL;
 }
 
+/* Dynamic linking: the loader has filled __libc.tls_head/tls_cnt and
+ * computed the layout for every module present at startup.  Allocate the
+ * initial thread's final TLS area, carry the provisional TCB over (errno,
+ * canary, malloc cache, ...) and switch the thread pointer to it. */
+hidden void __init_tls_dynamic(void)
+{
+	struct pthread *old = __self();
+	long r = __syscall(SYS_mmap, 0, __libc.tls_size, PROT_READ | PROT_WRITE,
+		MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	if (__is_err(r)) a_crash();
+	struct pthread *td = __copy_tls((unsigned char *)r);
+	uintptr_t *dtv = td->dtv;
+	memcpy(td, old, sizeof *td);
+	td->self = td;
+	td->dtv = dtv;
+	td->prev = td->next = td;
+	if (__set_thread_area(td) < 0) a_crash();
+	td->tid = (int)__syscall(SYS_set_tid_address, &td->tid);
+}
+
 hidden void __init_tls(size_t *aux)
 {
 	const Elf64_Phdr *phdr = (const void *)aux[AT_PHDR], *tls_ph = 0;

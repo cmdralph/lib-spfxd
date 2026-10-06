@@ -26,5 +26,22 @@ typedef struct {
 } Dl_info;
 int dladdr(const void *, Dl_info *);
 #endif
+#ifdef __SPFXD_GNU
+/* glibc 2.35 interface used by unwinders: locate the object containing an
+ * address and its PT_GNU_EH_FRAME data */
+struct link_map;
+struct dl_find_object {
+	unsigned long long dlfo_flags;
+	void *dlfo_map_start;
+	void *dlfo_map_end;
+	struct link_map *dlfo_link_map;
+	void *dlfo_eh_frame;
+	unsigned long long __dlfo_reserved[7];
+};
+#define DLFO_STRUCT_HAS_EH_DBASE 0
+#define DLFO_STRUCT_HAS_EH_COUNT 0
+#define DLFO_EH_SEGMENT_TYPE 0x6474e550
+int _dl_find_object(void *, struct dl_find_object *);
+#endif
 __SPFXD_END_DECLS
 #endif

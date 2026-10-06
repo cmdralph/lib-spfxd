@@ -16,8 +16,7 @@
 #endif
 #include "crt_arch.h"
 
-int main();
-int __libc_start_main(int (*)(), int, char **, void (*)(void), void (*)(void), void (*)(void));
+int main(int, char **, char **);
 
 extern void _init(void) __attribute__((__weak__));
 extern void _fini(void) __attribute__((__weak__));
@@ -53,6 +52,7 @@ static void run_fini(void)
 
 #ifndef START_C_ATTR
 #define START_C_ATTR
+void _start_c(long *, void *);
 #endif
 
 START_C_ATTR __attribute__((__used__, __noreturn__)) void _start_c(long *p, void *dyn)

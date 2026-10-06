@@ -16,13 +16,13 @@ libgcc.a%s %:if-exists(libgcc_eh.a%s)
 -lc
 
 *startfile:
-%{!shared:%{static-pie:@LIB@/rcrt1.o;pie:@LIB@/Scrt1.o;:@LIB@/crt1.o}} @LIB@/crti.o %{shared|pie|static-pie:crtbeginS.o%s;static:crtbeginT.o%s;:crtbegin.o%s}
+%{shared:;static:@LIB@/crt1.o;static-pie:@LIB@/rcrt1.o;!no-pie:@LIB@/Scrt1.o;:@LIB@/crt1.o} @LIB@/crti.o %{static:crtbeginT.o%s;shared|static-pie|!no-pie:crtbeginS.o%s;:crtbegin.o%s}
 
 *endfile:
-%{shared|pie|static-pie:crtendS.o%s;:crtend.o%s} @LIB@/crtn.o
+%{static:crtend.o%s;shared|static-pie|!no-pie:crtendS.o%s;:crtend.o%s} @LIB@/crtn.o
 
 *link:
--nostdlib %{!shared:%{!static:%{!static-pie:-dynamic-linker @LIB@/libc.so}}} %{shared:-shared} %{static:-static} %{static-pie:-static -pie --no-dynamic-linker -z text} %{rdynamic:-export-dynamic} %{!r:--gc-sections} --hash-style=both
+-m elf_x86_64 %{!r:--build-id} %{!static|static-pie:--eh-frame-hdr} -nostdlib %{!shared:%{!static:%{!static-pie:-dynamic-linker @LIB@/libc.so}}} %{shared:-shared} %{static:-static} %{static-pie:-static -pie --no-dynamic-linker -z text} %{rdynamic:-export-dynamic} %{!r:--gc-sections} --hash-style=both
 
 *esp_link:
 
