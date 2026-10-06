@@ -1,0 +1,35 @@
+%rename cpp_options spfxd_old_cpp_options
+
+*cpp_options:
+-nostdinc -isystem @INC@ -isystem @ARCHINC@ -isystem @CCINC@ %(spfxd_old_cpp_options)
+
+*cc1:
+%(cc1_cpu) -nostdinc -isystem @INC@ -isystem @ARCHINC@ -isystem @CCINC@
+
+*link_libgcc:
+-L@LIB@
+
+*libgcc:
+libgcc.a%s %:if-exists(libgcc_eh.a%s)
+
+*lib:
+-lc
+
+*startfile:
+%{!shared:%{static-pie:@LIB@/rcrt1.o;pie:@LIB@/Scrt1.o;:@LIB@/crt1.o}} @LIB@/crti.o %{shared|pie|static-pie:crtbeginS.o%s;static:crtbeginT.o%s;:crtbegin.o%s}
+
+*endfile:
+%{shared|pie|static-pie:crtendS.o%s;:crtend.o%s} @LIB@/crtn.o
+
+*link:
+-nostdlib %{!shared:%{!static:%{!static-pie:-dynamic-linker @LIB@/libc.so}}} %{shared:-shared} %{static:-static} %{static-pie:-static -pie --no-dynamic-linker -z text} %{rdynamic:-export-dynamic} %{!r:--gc-sections} --hash-style=both
+
+*esp_link:
+
+
+*esp_options:
+
+
+*esp_cpp_options:
+
+
