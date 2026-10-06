@@ -2,7 +2,7 @@
 #ifndef _AIO_H
 #define _AIO_H
 #include <features.h>
-#include <signal.h>
+#include <bits/siginfo.h>
 #define __SPFXD_NEED_size_t
 #define __SPFXD_NEED_ssize_t
 #define __SPFXD_NEED_off_t
