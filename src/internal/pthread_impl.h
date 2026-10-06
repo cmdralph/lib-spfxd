@@ -64,6 +64,7 @@ struct pthread {
 	volatile int killlock;            /* held while tid may be targeted by tgkill */
 	char *dlerror_buf;
 	int dlerror_flag;
+	int h_errno_val;
 	sigset_t sigmask;                 /* signal mask the new thread starts with */
 	void *tsd[PTHREAD_KEYS_MAX];
 	char name[16];

@@ -84,7 +84,7 @@
 #define COLL_WEIGHTS_MAX 2
 #define EXPR_NEST_MAX   32
 #define LINE_MAX        4096
-#define RE_DUP_MAX      255
+#define RE_DUP_MAX      32767
 #define NL_ARGMAX       64
 #define NL_LANGMAX      32
 #define NL_MSGMAX       32767

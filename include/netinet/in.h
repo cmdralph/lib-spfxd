@@ -82,6 +82,28 @@ extern const struct in6_addr in6addr_any, in6addr_loopback;
 	(((const uint32_t *)(a))[0] == 0 && ((const uint32_t *)(a))[1] == 0 && \
 	 ((const uint8_t *)(a))[8] == 0 && ((const uint8_t *)(a))[9] == 0 && \
 	 ((const uint8_t *)(a))[10] == 0xff && ((const uint8_t *)(a))[11] == 0xff)
+#define IN6_IS_ADDR_V4COMPAT(a) \
+	(((const uint32_t *)(a))[0] == 0 && ((const uint32_t *)(a))[1] == 0 && \
+	 ((const uint32_t *)(a))[2] == 0 && ((const uint8_t *)(a))[15] > 1)
+#define IN6_IS_ADDR_LINKLOCAL(a) \
+	(((const uint8_t *)(a))[0] == 0xfe && (((const uint8_t *)(a))[1] & 0xc0) == 0x80)
+#define IN6_IS_ADDR_SITELOCAL(a) \
+	(((const uint8_t *)(a))[0] == 0xfe && (((const uint8_t *)(a))[1] & 0xc0) == 0xc0)
+#define IN6_IS_ADDR_MC_NODELOCAL(a) \
+	(IN6_IS_ADDR_MULTICAST(a) && (((const uint8_t *)(a))[1] & 0xf) == 0x1)
+#define IN6_IS_ADDR_MC_LINKLOCAL(a) \
+	(IN6_IS_ADDR_MULTICAST(a) && (((const uint8_t *)(a))[1] & 0xf) == 0x2)
+#define IN6_IS_ADDR_MC_SITELOCAL(a) \
+	(IN6_IS_ADDR_MULTICAST(a) && (((const uint8_t *)(a))[1] & 0xf) == 0x5)
+#define IN6_IS_ADDR_MC_ORGLOCAL(a) \
+	(IN6_IS_ADDR_MULTICAST(a) && (((const uint8_t *)(a))[1] & 0xf) == 0x8)
+#define IN6_IS_ADDR_MC_GLOBAL(a) \
+	(IN6_IS_ADDR_MULTICAST(a) && (((const uint8_t *)(a))[1] & 0xf) == 0xe)
+#define IN6_ARE_ADDR_EQUAL(a, b) \
+	(((const uint32_t *)(a))[0] == ((const uint32_t *)(b))[0] && \
+	 ((const uint32_t *)(a))[1] == ((const uint32_t *)(b))[1] && \
+	 ((const uint32_t *)(a))[2] == ((const uint32_t *)(b))[2] && \
+	 ((const uint32_t *)(a))[3] == ((const uint32_t *)(b))[3])
 
 __SPFXD_BEGIN_DECLS
 uint32_t htonl(uint32_t);
