@@ -102,6 +102,7 @@ struct malloc_tcache {
 
 extern hidden const uint32_t __malloc_class_size[NCLASS];
 extern hidden const uint8_t __malloc_class_pages[NCLASS];
+extern hidden const uint64_t __malloc_class_magic[NCLASS];
 
 static __inline unsigned size_to_class(size_t n)
 {

@@ -82,7 +82,9 @@ void *memmem(const void *, size_t, const void *, size_t) __spfxd_pure;
 void *memrchr(const void *, int, size_t) __spfxd_pure;
 void *rawmemchr(const void *, int) __spfxd_pure;
 void *mempcpy(void *__restrict, const void *__restrict, size_t);
+#ifndef basename
 char *basename(const char *);
+#endif
 const char *sigdescr_np(int);
 const char *sigabbrev_np(int);
 const char *strerrorname_np(int);

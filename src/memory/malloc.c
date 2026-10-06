@@ -460,12 +460,21 @@ hidden void __malloc_thread_exit(struct pthread *self)
 /* small objects                                                           */
 /* ---------------------------------------------------------------------- */
 
+/* Objects sitting in a thread cache carry the cache's key in their second
+ * word; a free of an object that still carries it is checked against the
+ * bin (glibc-style double-free detection).  Allocation clears the tag. */
+static __inline uintptr_t tc_key(const struct malloc_tcache *tc)
+{
+	return (uintptr_t)tc ^ __libc.secret;
+}
+
 static __inline void *tc_pop(struct tcache_bin *b)
 {
 	void *o = b->head;
 	if (likely(o)) {
 		b->head = link_decode(o);
 		b->count--;
+		((uintptr_t *)o)[1] = 0;
 	}
 	return o;
 }
@@ -490,8 +499,20 @@ static __inline void *small_alloc(unsigned cls)
 	return small_slow(cls);
 }
 
-static void small_free(void *p, unsigned cls)
+static cold void tc_check_double(const struct tcache_bin *b, void *p)
 {
+	unsigned n = 0;
+	for (void *o = b->head; o && n <= b->count; o = link_decode(o), n++)
+		if (o == p) malloc_abort("free(): double free detected");
+}
+
+static void small_free(void *p, struct span *s)
+{
+	unsigned cls = s->cls;
+	size_t off = (size_t)((unsigned char *)p - span_base(s));
+	size_t q = (size_t)((off * __malloc_class_magic[cls]) >> 40);
+	if (unlikely(q * __malloc_class_size[cls] != off || q >= s->capacity))
+		malloc_abort("free(): invalid pointer");
 	struct malloc_tcache *tc = get_tcache();
 	if (unlikely(!tc)) {
 		struct tcache_bin tmp = { 0, 0, 1 };
@@ -502,7 +523,9 @@ static void small_free(void *p, unsigned cls)
 		return;
 	}
 	struct tcache_bin *b = &tc->bin[cls];
-	if (unlikely(b->head == p)) malloc_abort("free(): double free detected");
+	uintptr_t key = tc_key(tc);
+	if (unlikely(((uintptr_t *)p)[1] == key)) tc_check_double(b, p);
+	((uintptr_t *)p)[1] = key;
 	*(void **)p = link_encode(p, b->head);
 	b->head = p;
 	if (unlikely(++b->count > b->max)) central_flush(cls, b, b->count / 2);
@@ -697,7 +720,7 @@ void free(void *p)
 	}
 	struct span *s = span_of(g, p);
 	if (likely(s->kind == SPAN_SMALL)) {
-		small_free(p, s->cls);
+		small_free(p, s);
 		return;
 	}
 	if (s->kind == SPAN_LARGE && (unsigned char *)p == span_base(s)) {

@@ -38,6 +38,18 @@ out.append("hidden const uint8_t __malloc_class_pages[NCLASS] = {")
 for i in range(0, 40, 8):
     out.append("\t" + ", ".join(str(p) for p in pages[i:i+8]) + ",")
 out.append("};")
+out.append("")
+out.append("/* ceil(2^40 / size): offset / size == (offset * magic) >> 40 exactly for")
+out.append(" * every offset inside a span (< 2^17), so slot alignment is checked")
+out.append(" * with two multiplications instead of a division */")
+out.append("hidden const uint64_t __malloc_class_magic[NCLASS] = {")
+for i in range(0, 40, 4):
+    out.append("\t" + ", ".join("%dULL" % (((1 << 40) + s - 1) // s) for s in sizes[i:i+4]) + ",")
+out.append("};")
+for s_ in sizes:
+    m = ((1 << 40) + s_ - 1) // s_
+    for off in range(0, 32 * 4096, 16):
+        assert (off * m) >> 40 == off // s_
 open("src/memory/malloc_classes.c", "w").write("\n".join(out) + "\n")
 for cs, k in zip(sizes, pages):
     n = k * 4096 // cs

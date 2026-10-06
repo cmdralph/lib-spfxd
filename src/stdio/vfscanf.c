@@ -9,9 +9,9 @@
  *
  * Input is read straight out of the stream buffer.  Numbers are first
  * collected as the longest prefix that can begin a valid numeral, then
- * converted with the strtol/strtod machinery; characters collected beyond
- * what the converter accepted are pushed back when they are still in the
- * buffer (always the case for sscanf).
+ * converted with the strtol/strtod machinery.  As C11 7.21.6.2p9 requires,
+ * an input item that is only the prefix of a numeral ("1.5e", "0x", "-")
+ * is consumed and the directive fails.
  */
 #include <ctype.h>
 #include <errno.h>
@@ -31,7 +31,6 @@ struct in {
 	FILE *f;
 	long long count;   /* characters consumed (for %n) */
 	long width;        /* remaining field width, or LONG_MAX */
-	unsigned char *mark_rend;   /* buffer state when a numeral began */
 };
 
 static int in_get(struct in *in)
@@ -52,24 +51,6 @@ static void in_unget(struct in *in, int c)
 	in->f->rpos--;
 	in->count--;
 	in->width++;
-}
-
-static void in_mark(struct in *in)
-{
-	in->mark_rend = in->f->rend;
-}
-
-/* Push back k characters read since in_mark, if they are all still in the
- * stream buffer (no refill happened since).  In-memory streams (sscanf)
- * always qualify. */
-static int in_unget_many(struct in *in, size_t k)
-{
-	FILE *f = in->f;
-	if (!(f->flags & F_STR) && (f->rend != in->mark_rend || (size_t)(f->rpos - f->buf) < k))
-		return 0;
-	f->rpos -= k;
-	in->count -= (long long)k;
-	return 1;
 }
 
 static void skip_space(struct in *in)
@@ -431,7 +412,6 @@ hidden int __vfscanf_core(FILE *restrict f, const char *restrict fmt, va_list ap
 			b.p = b.small;
 			b.cap = sizeof b.small;
 			int base = conv == 'd' || conv == 'u' ? 10 : conv == 'i' ? 0 : conv == 'o' ? 8 : 16;
-			in_mark(&in);
 			collect_int(&in, &b, base);
 			if (b.oom) {
 				buf_free(&b);
@@ -452,12 +432,11 @@ hidden int __vfscanf_core(FILE *restrict f, const char *restrict fmt, va_list ap
 				end = b.p;
 			}
 			size_t used = (size_t)(end - b.p);
-			if (used < b.n && !in_unget_many(&in, b.n - used) && !used) {
-				buf_free(&b);
-				goto done;
-			}
 			buf_free(&b);
-			if (!used) goto done;
+			/* the input item is consumed; if it is only a prefix of a
+			 * numeral (a lone sign, "0x") the directive fails (C11
+			 * 7.21.6.2p9) */
+			if (!used || used < b.n) goto done;
 			if (!suppress) {
 				if (conv == 'p') *(void **)dest = (void *)(uintptr_t)v;
 				else store_int(dest, len, v);
@@ -470,7 +449,6 @@ hidden int __vfscanf_core(FILE *restrict f, const char *restrict fmt, va_list ap
 			struct buf b = { 0 };
 			b.p = b.small;
 			b.cap = sizeof b.small;
-			in_mark(&in);
 			collect_float(&in, &b);
 			if (b.oom) {
 				buf_free(&b);
@@ -480,9 +458,11 @@ hidden int __vfscanf_core(FILE *restrict f, const char *restrict fmt, va_list ap
 			long double v = b.n ? __strtold_internal(b.p, &end,
 				len == L_BIGL ? 2 : len == L_L ? 1 : 0) : 0;
 			size_t used = (size_t)(end - b.p);
-			if (used < b.n) in_unget_many(&in, b.n - used);
 			buf_free(&b);
-			if (!used) goto done;
+			/* "1.5e", "0x", "-": a prefix of a numeral that is not one
+			 * is a matching failure (C11 7.21.6.2p9, the "100ergs"
+			 * example); the input item stays consumed */
+			if (!used || used < b.n) goto done;
 			if (!suppress) {
 				if (len == L_BIGL) *(long double *)dest = v;
 				else if (len == L_L) *(double *)dest = (double)v;

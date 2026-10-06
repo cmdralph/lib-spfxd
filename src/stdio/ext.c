@@ -7,7 +7,9 @@
 #include <string.h>
 #include "stdio_impl.h"
 
-size_t __fbufsize(FILE *f) { return f->buf_size; }
+/* A caller-supplied buffer lends UNGET bytes to ungetc; report the size
+ * the caller gave. */
+size_t __fbufsize(FILE *f) { return f->buf_size ? f->buf_size + ((f->flags & F_SVB) ? UNGET : 0) : 0; }
 
 size_t __fpending(FILE *f) { return f->wend ? (size_t)(f->wpos - f->wbase) : 0; }
 
