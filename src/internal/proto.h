@@ -35,4 +35,7 @@ hidden uint32_t __uni_toupper(uint32_t);
 hidden uint32_t __uni_tolower(uint32_t);
 hidden int __uni_width(uint32_t);
 
+/* ucontext */
+hidden int __ucontext_fail(int);
+
 #endif

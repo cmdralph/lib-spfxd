@@ -168,7 +168,7 @@ int nice(int);
 void sync(void);
 pid_t setpgrp(void);
 void swab(const void *__restrict, void *__restrict, ssize_t);
-char *crypt(const char *, const char *);
+
 int usleep(useconds_t);
 pid_t vfork(void);
 int brk(void *);

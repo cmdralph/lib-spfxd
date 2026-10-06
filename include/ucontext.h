@@ -3,6 +3,7 @@
 #define _UCONTEXT_H
 #include <features.h>
 #include <signal.h>
+#include <bits/siginfo.h>
 __SPFXD_BEGIN_DECLS
 int getcontext(ucontext_t *);
 int setcontext(const ucontext_t *);

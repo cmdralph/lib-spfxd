@@ -3,6 +3,9 @@
 #define _SYS_TIMERFD_H
 #include <features.h>
 #include <time.h>
+#define __SPFXD_NEED_struct_timespec
+#define __SPFXD_NEED_struct_itimerspec
+#include <bits/typedefs.h>
 #define TFD_NONBLOCK 04000
 #define TFD_CLOEXEC 02000000
 #define TFD_TIMER_ABSTIME 1

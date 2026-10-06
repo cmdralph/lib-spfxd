@@ -4,6 +4,7 @@
 #include <features.h>
 #include <stdint.h>
 #include <signal.h>
+#include <bits/siginfo.h>
 #define SFD_NONBLOCK 04000
 #define SFD_CLOEXEC 02000000
 struct signalfd_siginfo {

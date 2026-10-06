@@ -178,6 +178,10 @@ struct timespec { long tv_sec; long tv_nsec; };
 #define __SPFXD_DEF_struct_timeval
 struct timeval { long tv_sec; long tv_usec; };
 #endif
+#if defined(__SPFXD_NEED_struct_itimerspec) && !defined(__SPFXD_DEF_struct_itimerspec)
+#define __SPFXD_DEF_struct_itimerspec
+struct itimerspec { struct timespec it_interval, it_value; };
+#endif
 #if defined(__SPFXD_NEED_struct_iovec) && !defined(__SPFXD_DEF_struct_iovec)
 #define __SPFXD_DEF_struct_iovec
 struct iovec { void *iov_base; unsigned long iov_len; };

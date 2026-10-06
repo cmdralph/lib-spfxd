@@ -12,6 +12,7 @@
 #define __SPFXD_NEED_timer_t
 #define __SPFXD_NEED_pid_t
 #define __SPFXD_NEED_locale_t
+#define __SPFXD_NEED_struct_itimerspec
 #endif
 #include <bits/typedefs.h>
 
@@ -69,7 +70,6 @@ int timespec_getres(struct timespec *, int);
 #define CLOCK_TAI               11
 #define TIMER_ABSTIME 1
 
-struct itimerspec { struct timespec it_interval, it_value; };
 struct sigevent;
 
 size_t strftime_l(char *__restrict, size_t, const char *__restrict, const struct tm *__restrict, locale_t);
