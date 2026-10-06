@@ -104,6 +104,9 @@ FILE *tmpfile(void);
 #if defined(__SPFXD_POSIX)
 FILE *fdopen(int, const char *);
 int fileno(FILE *);
+#ifdef __SPFXD_BSD
+int fpurge(FILE *);
+#endif
 FILE *fmemopen(void *__restrict, size_t, const char *__restrict);
 FILE *open_memstream(char **, size_t *);
 FILE *popen(const char *, const char *);

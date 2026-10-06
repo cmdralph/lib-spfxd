@@ -55,8 +55,8 @@ BASEFLAGS := -std=gnu11 -nostdinc -ffreestanding -fno-stack-protector \
 ifeq ($(findstring clang,$(shell $(CC) --version 2>/dev/null)),)
 BASEFLAGS += -fno-stack-clash-protection
 endif
-CFLAGS_LIB  = $(BASEFLAGS) $(OPT) $(WARN) $(INCS) $(EXTRA_CFLAGS)
-ASFLAGS_LIB = $(INCS) -nostdinc
+CFLAGS_LIB  = $(BASEFLAGS) $(OPT) $(WARN) $(INCS) -MMD -MP $(EXTRA_CFLAGS)
+ASFLAGS_LIB = $(INCS) -nostdinc -MMD -MP
 
 # ---------------------------------------------------------------------------
 # Sources
@@ -113,9 +113,11 @@ $(O)/shared/ldso/%.o: ldso/%.c
 	@echo "  CC [ldso] $<"
 	@$(CC) $(CFLAGS_LIB) -fPIC -DSPFXD_SHARED -fno-asynchronous-unwind-tables -c -o $@ $<
 
-# Header dependencies: every object depends on the internal headers.
+# Header dependencies: generated per object by -MMD (public and internal
+# headers); every object also depends on the Makefile itself.
 INTERNAL_HDRS := $(wildcard src/internal/*.h arch/$(ARCH)/internal/*.h)
-$(STATIC_OBJS) $(SHARED_OBJS): $(INTERNAL_HDRS) Makefile
+$(STATIC_OBJS) $(SHARED_OBJS): Makefile
+-include $(STATIC_OBJS:.o=.d) $(SHARED_OBJS:.o=.d)
 
 # ---------------------------------------------------------------------------
 # Libraries
