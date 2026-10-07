@@ -11,3 +11,7 @@ unsigned long getauxval(unsigned long type)
 	errno = ENOENT;
 	return 0;
 }
+
+/* libgcc's out-of-line atomics (the AArch64 default) look for LSE support
+ * through this name */
+weak_alias(getauxval, __getauxval);

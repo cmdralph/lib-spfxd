@@ -4,6 +4,6 @@
 
 hidden int __set_thread_area(void *p)
 {
-	__asm__ __volatile__ ("msr tpidr_el0, %0" : : "r"((struct pthread *)p + 1) : "memory");
+	__asm__ __volatile__ ("msr tpidr_el0, %0" : : "r"(TP_ADJ(p)) : "memory");
 	return 0;
 }

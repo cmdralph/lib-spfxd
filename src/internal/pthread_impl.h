@@ -82,6 +82,14 @@ static __inline struct pthread *__self(void)
 #endif
 }
 
+/* The thread pointer value for a thread whose struct pthread is at p
+ * (what clone's CLONE_SETTLS installs). */
+#if TLS_ABOVE_TP
+#define TP_ADJ(p) ((void *)((struct pthread *)(p) + 1))
+#else
+#define TP_ADJ(p) ((void *)(p))
+#endif
+
 /* Internal signals: never deliverable to applications, never blockable by
  * them (sigprocmask and friends strip them). */
 #define SIGCANCEL 32

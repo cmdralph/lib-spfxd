@@ -8,7 +8,7 @@ exceeds its bound.
 
     python3 tests/math/ulp_check.py <driver> [filter]
 """
-import subprocess, sys
+import os, subprocess, sys
 import mpmath as mp
 from mpmath import mpf
 
@@ -144,7 +144,8 @@ def main():
     failed = 0
     for (fn, fmt, cnt, lo, hi, r2, bound) in CASES:
         if filt and filt not in fn: continue
-        args = [driver, fn, str(cnt), repr(lo), repr(hi)]
+        # RUN: optional emulator prefix for a cross-built driver (qemu-aarch64)
+        args = os.environ.get("RUN", "").split() + [driver, fn, str(cnt), repr(lo), repr(hi)]
         if r2: args += [repr(r2[0]), repr(r2[1])]
         out = subprocess.run(args, capture_output=True, text=True, check=True).stdout
         f = ref_fn(fn)

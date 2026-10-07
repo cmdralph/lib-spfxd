@@ -7,3 +7,4 @@
 bench/out/
 /build-*/
 /lib-*/
+/tests/out-*/

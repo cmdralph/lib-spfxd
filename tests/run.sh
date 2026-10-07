@@ -10,11 +10,31 @@
 # math/        libm accuracy oracle (requires python3 with mpmath)
 #
 # Logs and binaries go to tests/out/.
+#
+# ARCH=aarch64 tests the AArch64 build (lib-aarch64/) from any host: the
+# programs run under qemu-aarch64 (RUN), and the oracle's reference
+# programs are built with aarch64-linux-gnu-gcc against that toolchain's C
+# library and run under qemu with its sysroot (HOSTRUN).
 cd "$(dirname "$0")" || exit 1
 TOP=$(cd .. && pwd)
-CC="$TOP/lib/spfxd-gcc"
-HOSTCC=${HOSTCC:-cc}
-OUT="$TOP/tests/out"
+ARCH=${ARCH:-x86_64}
+if [ "$ARCH" = x86_64 ]; then
+	LIBDIR="$TOP/lib"
+	OUT="$TOP/tests/out"
+	HOSTCC=${HOSTCC:-cc}
+else
+	LIBDIR="$TOP/lib-$ARCH"
+	OUT="$TOP/tests/out-$ARCH"
+	HOSTCC=${HOSTCC:-$ARCH-linux-gnu-gcc}
+	if [ "$(uname -m)" != "$ARCH" ]; then
+		RUN=${RUN:-qemu-$ARCH}
+		HOSTRUN=${HOSTRUN:-qemu-$ARCH -L /usr/$ARCH-linux-gnu}
+	fi
+fi
+export RUN
+# lets tests skip checks that user-mode emulation cannot support
+[ -n "$RUN" ] && export SPFXD_EMULATED=1
+CC="$LIBDIR/spfxd-gcc"
 CFLAGS="-O2 -g -Wall -Wno-unused-result -D_GNU_SOURCE -Icommon"
 TIMEOUT=${TIMEOUT:-300}
 MODES=${*:-static dynamic}
@@ -36,12 +56,12 @@ for mode in $MODES; do
 		if ! "$CC" $MFLAG $CFLAGS -o "$bin" "$src" -lm -lpthread >"$bin.build.log" 2>&1; then
 			cat "$bin.build.log"; record "$mode/unit/$n (build)" 1; continue
 		fi
-		(cd "$OUT/$mode" && timeout "$TIMEOUT" "$bin" >"$bin.log" 2>&1); st=$?
+		(cd "$OUT/$mode" && timeout "$TIMEOUT" $RUN "$bin" >"$bin.log" 2>&1); st=$?
 		[ $st != 0 ] && tail -20 "$bin.log"
 		record "$mode/unit/$n" $st
 		case $n in memstr_fuzz|string)
 			# again on the baseline (SSE2) code paths
-			(cd "$OUT/$mode" && LIBSPFXD_CPU=baseline timeout "$TIMEOUT" "$bin" >"$bin.base.log" 2>&1); st=$?
+			(cd "$OUT/$mode" && LIBSPFXD_CPU=baseline timeout "$TIMEOUT" $RUN "$bin" >"$bin.base.log" 2>&1); st=$?
 			[ $st != 0 ] && tail -20 "$bin.base.log"
 			record "$mode/unit/$n (baseline cpu)" $st ;;
 		esac
@@ -49,15 +69,23 @@ for mode in $MODES; do
 	for src in oracle/*.c; do
 		n=$(basename "$src" .c)
 		ref="$OUT/host-$n"
+		# Oracles marked ORACLE_PORTABLE produce architecture-independent
+		# output; when cross-testing they take their reference from the
+		# native C library (the cross sysroot's may lack parts, e.g. the
+		# iconv converter modules).
+		refcc=$HOSTCC refrun=$HOSTRUN
+		if [ -n "$HOSTRUN" ] && grep -q ORACLE_PORTABLE "$src"; then
+			refcc=cc refrun= ref="$OUT/host-native-$n"
+		fi
 		if [ ! -x "$ref" ] || [ "$src" -nt "$ref" ]; then
-			"$HOSTCC" -O1 $CFLAGS -o "$ref" "$src" -lm >/dev/null 2>&1 || { echo "  (host build of $n failed, skipped)"; continue; }
+			"$refcc" -O1 $CFLAGS -o "$ref" "$src" -lm >/dev/null 2>&1 || { echo "  (host build of $n failed, skipped)"; continue; }
 		fi
 		bin="$OUT/$mode/oracle-$n"
 		if ! "$CC" $MFLAG -O1 $CFLAGS -o "$bin" "$src" -lm >"$bin.build.log" 2>&1; then
 			cat "$bin.build.log"; record "$mode/oracle/$n (build)" 1; continue
 		fi
-		timeout "$TIMEOUT" "$ref" >"$ref.out" 2>&1
-		timeout "$TIMEOUT" "$bin" >"$bin.out" 2>&1
+		timeout "$TIMEOUT" $refrun "$ref" >"$ref.out" 2>&1
+		timeout "$TIMEOUT" $RUN "$bin" >"$bin.out" 2>&1
 		if cmp -s "$ref.out" "$bin.out"; then record "$mode/oracle/$n" 0
 		else diff "$ref.out" "$bin.out" | head -20; record "$mode/oracle/$n" 1; fi
 	done
@@ -67,7 +95,7 @@ for mode in $MODES; do
 		   "$CC" -O2 -fPIC -shared -o "$d/libmid.so" dynamic/libmid.c -L"$d" -ldep &&
 		   "$CC" -O2 -fPIC -shared -o "$d/libplug.so" dynamic/libplug.c &&
 		   "$CC" -O2 -rdynamic -o "$d/dyn_main" dynamic/dyn_main.c -L"$d" -lmid -ldep -Wl,-rpath,'$ORIGIN' -lpthread; then
-			timeout "$TIMEOUT" "$d/dyn_main" >"$d/dyn_main.log" 2>&1; st=$?
+			timeout "$TIMEOUT" $RUN "$d/dyn_main" >"$d/dyn_main.log" 2>&1; st=$?
 			[ $st != 0 ] && tail -20 "$d/dyn_main.log"
 			record "dynamic/dlopen" $st
 		else
@@ -88,7 +116,7 @@ if python3 -c "import mpmath" 2>/dev/null; then
 	st=0
 	for m in near up down zero; do
 		for f in exp exp2 log log2 log10 pow atan; do
-			"$OUT/mdump" $f 1500 5 $m | python3 math/judge.py $f $m >>"$OUT/judge.log" 2>&1 || st=1
+			$RUN "$OUT/mdump" $f 1500 5 $m | python3 math/judge.py $f $m >>"$OUT/judge.log" 2>&1 || st=1
 		done
 	done
 	[ $st != 0 ] && grep "ulp)" "$OUT/judge.log" | head
