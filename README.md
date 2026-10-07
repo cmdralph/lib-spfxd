@@ -1,5 +1,15 @@
 # lib-spfxd
 
+### 🧩 Note on Development
+
+This repository is part of a series of parallel projects designed to push the boundaries of AI-assisted engineering and explore what is possible with advanced prompting.
+
+* The Goal: Test the execution limits of Claude Code while mapping out complex system architectures.
+
+* The Approach: I strictly focus on ownership of the design, architectural decisions, and precise prompt steering—ensuring the claude can execute clean, production-grade code exactly as architected rather than relying on automated guesswork, aka vibecoding.
+
+---
+
 **lib-spfxd** (Standard Primitive Framework & eXtensions / Definitions) is a
 complete C standard library for Linux on **x86-64** and **AArch64
 (ARM64)**, written from first principles. It has its own public headers, raw system-call layer, program
