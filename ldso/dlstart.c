@@ -12,20 +12,11 @@
 
 hidden _Noreturn void __dls2(unsigned char *base, size_t *sp);
 
-__asm__(
-	".text\n"
-	".global _dlstart\n"
-	".hidden _dlstart\n"
-	".type _dlstart,@function\n"
-	"_dlstart:\n"
-	"	xor %ebp,%ebp\n"
-	"	mov %rsp,%rdi\n"
-	"	lea _DYNAMIC(%rip),%rsi\n"
-	"	and $-16,%rsp\n"
-	"	call _dlstart_c\n"
-	"	hlt\n"
-	".size _dlstart,.-_dlstart\n"
-);
+/* the entry stub is the same as a program's _start (crt_arch.h): pass the
+ * initial stack pointer and the address of _DYNAMIC to _dlstart_c */
+#define START "_dlstart"
+#define START_EXTRA ".hidden _dlstart\n"
+#include "crt_arch.h"
 
 hidden _Noreturn void _dlstart_c(size_t *sp, size_t *dynv);
 

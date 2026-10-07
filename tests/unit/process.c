@@ -48,10 +48,20 @@ int main(int argc, char **argv)
 	CHECK(!waitid(P_PID, (id_t)p, &si, WEXITED) && si.si_pid == p && si.si_status == 9 && si.si_code == CLD_EXITED, "waitid");
 
 	/* exec family */
-	p = fork();
-	if (!p) { execl(argv[0], argv[0], "child-exit", "7", (char *)0); _exit(100); }
-	waitpid(p, &st, 0);
-	CHECK(WEXITSTATUS(st) == 7, "execl");
+	/* Under user-mode emulation (qemu-user without binfmt_misc) a child
+	 * cannot exec this program's own foreign-architecture binary, and
+	 * CLONE_VM|CLONE_VFORK is emulated as a plain fork, so posix_spawn
+	 * cannot report exec failures through shared memory.  Those checks
+	 * are skipped there (the host C library fails them the same way). */
+	int emulated = getenv("SPFXD_EMULATED") != 0;
+	if (emulated) {
+		SKIP("execl/execle of this program and posix_spawn exec-failure reporting under emulation");
+	} else {
+		p = fork();
+		if (!p) { execl(argv[0], argv[0], "child-exit", "7", (char *)0); _exit(100); }
+		waitpid(p, &st, 0);
+		CHECK(WEXITSTATUS(st) == 7, "execl");
+	}
 	p = fork();
 	if (!p) { execlp("sh", "sh", "-c", "exit 5", (char *)0); _exit(100); }
 	waitpid(p, &st, 0);
@@ -64,6 +74,8 @@ int main(int argc, char **argv)
 	/* pipe + dup2 + exec */
 	int fds[2];
 	CHECK(!pipe2(fds, O_CLOEXEC), "pipe2");
+	char buf[256];
+	if (!emulated) {
 	p = fork();
 	if (!p) {
 		dup2(fds[1], 1);
@@ -72,11 +84,14 @@ int main(int argc, char **argv)
 		_exit(100);
 	}
 	close(fds[1]);
-	char buf[256];
 	read_all(fds[0], buf, sizeof buf);
 	close(fds[0]);
 	waitpid(p, &st, 0);
 	CHECK(!strcmp(buf, "hello"), "execle environment: '%s'", buf);
+	} else {
+		close(fds[0]);
+		close(fds[1]);
+	}
 
 	/* posix_spawn with file actions and attributes */
 	pipe(fds);
@@ -101,7 +116,8 @@ int main(int argc, char **argv)
 	posix_spawn_file_actions_destroy(&fa);
 	posix_spawnattr_destroy(&attr);
 	char *bad[] = { "x", 0 };
-	CHECK(posix_spawn(&p, "/nonexistent", 0, 0, bad, environ) == ENOENT, "posix_spawn reports exec failure");
+	if (!emulated)
+		CHECK(posix_spawn(&p, "/nonexistent", 0, 0, bad, environ) == ENOENT, "posix_spawn reports exec failure");
 	posix_spawn_file_actions_init(&fa);
 	posix_spawn_file_actions_addopen(&fa, 1, "/tmp/spfxd_spawn_out", O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	char *eargv[] = { "sh", "-c", "echo file-action", 0 };

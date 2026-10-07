@@ -18,6 +18,7 @@
 #define _SPFXD_RELOC_SELF_H
 
 #include <elf.h>
+#include "reloc.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -66,13 +67,13 @@ void __rs_relocate(size_t base, const Elf64_Dyn *dynv, int self_syms)
 			size_t *where = (size_t *)(base + r->r_offset);
 			uint32_t type = (uint32_t)ELF64_R_TYPE(r->r_info);
 			uint32_t si = (uint32_t)ELF64_R_SYM(r->r_info);
-			if (type == R_X86_64_RELATIVE) {
+			if (type == REL_RELATIVE) {
 				*where = base + (size_t)r->r_addend;
 			} else if (self_syms && si && symtab &&
-			           (type == R_X86_64_GLOB_DAT || type == R_X86_64_JUMP_SLOT || type == R_X86_64_64)) {
+			           (type == REL_GOT || type == REL_PLT || type == REL_SYMBOLIC)) {
 				const Elf64_Sym *s = (const Elf64_Sym *)(base + symtab) + si;
 				if (s->st_shndx != SHN_UNDEF && ELF64_ST_TYPE(s->st_info) != STT_TLS)
-					*where = base + s->st_value + (type == R_X86_64_64 ? (size_t)r->r_addend : 0);
+					*where = base + s->st_value + (type == REL_SYMBOLIC ? (size_t)r->r_addend : 0);
 			}
 		}
 	}

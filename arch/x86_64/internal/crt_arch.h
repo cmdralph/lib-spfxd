@@ -12,8 +12,12 @@
  * original stack pointer to C, and re-align rsp to 16 bytes so the `call`
  * leaves the stack exactly as the SysV ABI requires on function entry.
  */
+#ifndef START_EXTRA
+#define START_EXTRA ""
+#endif
 __asm__(
 	".text\n"
+	START_EXTRA
 	".weak _DYNAMIC\n"
 	".hidden _DYNAMIC\n"
 	".global " START "\n"

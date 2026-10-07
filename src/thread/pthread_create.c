@@ -159,7 +159,7 @@ int pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict attrp
 	int r = __clone(start, td->stack,
 		CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD |
 		CLONE_SYSVSEM | CLONE_SETTLS | CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID,
-		td, &td->tid, td, &td->tid);
+		td, &td->tid, TP_ADJ(td), &td->tid);
 	if (r < 0) {
 		__tl_unlock();
 		__restore_sigs(&set);

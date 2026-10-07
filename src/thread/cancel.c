@@ -45,7 +45,7 @@ static void cancel_handler(int sig, siginfo_t *si, void *ctx)
 {
 	struct pthread *self = __self();
 	ucontext_t *uc = ctx;
-	uintptr_t pc = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
+	uintptr_t pc = (uintptr_t)UC_PC(uc);
 
 	a_barrier();
 	if (!self->cancel || self->cancel_disable) return;
@@ -55,7 +55,7 @@ static void cancel_handler(int sig, siginfo_t *si, void *ctx)
 		return;
 	}
 	if (pc >= (uintptr_t)__cp_begin && pc < (uintptr_t)__cp_end)
-		uc->uc_mcontext.gregs[REG_RIP] = (greg_t)(uintptr_t)__cp_cancel;
+		UC_PC(uc) = (uintptr_t)__cp_cancel;
 }
 
 static void init_cancellation(void)

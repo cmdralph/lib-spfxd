@@ -1,9 +1,10 @@
 /*
  * lib-spfxd — thread control block (TCB) and threading internals.
  *
- * Every thread, including the initial one, owns a struct pthread that the
- * %fs base points to.  The first words have fixed offsets demanded by the
- * x86-64 ABI and by compiler-generated code:
+ * Every thread, including the initial one, owns a struct pthread.  On
+ * x86-64 the %fs base points to it and the first words have fixed offsets
+ * demanded by the ABI and by compiler-generated code (on AArch64 it sits
+ * just below TPIDR_EL0 and no offsets are fixed; see arch.h):
  *
  *   0x00 self    TLS ABI: `mov %fs:0,%reg` yields the thread pointer
  *   0x08 dtv     dynamic thread vector for __tls_get_addr
@@ -74,8 +75,20 @@ struct pthread {
 
 static __inline struct pthread *__self(void)
 {
+#if TLS_ABOVE_TP
+	return (struct pthread *)__arch_tp() - 1;       /* just below the thread pointer */
+#else
 	return (struct pthread *)__arch_tp();
+#endif
 }
+
+/* The thread pointer value for a thread whose struct pthread is at p
+ * (what clone's CLONE_SETTLS installs). */
+#if TLS_ABOVE_TP
+#define TP_ADJ(p) ((void *)((struct pthread *)(p) + 1))
+#else
+#define TP_ADJ(p) ((void *)(p))
+#endif
 
 /* Internal signals: never deliverable to applications, never blockable by
  * them (sigprocmask and friends strip them). */
@@ -123,7 +136,10 @@ hidden void __tls_thread_exit(struct pthread *);
 
 #endif
 
+#if !TLS_ABOVE_TP
+/* x86-64: fixed offsets from the thread pointer used by compiled code */
 _Static_assert(__builtin_offsetof(struct pthread, self) == 0, "TCB self offset");
 _Static_assert(__builtin_offsetof(struct pthread, dtv) == 8, "TCB dtv offset");
 _Static_assert(__builtin_offsetof(struct pthread, canary) == TCB_CANARY_OFFSET, "TCB canary offset");
 _Static_assert(__builtin_offsetof(struct pthread, errno_val) == 0x3c, "TCB errno offset (see internal errno.h)");
+#endif

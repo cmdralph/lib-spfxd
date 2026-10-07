@@ -2,6 +2,8 @@
  * lib-spfxd oracle test — iconv between Unicode encodings and single-byte
  * character sets, including invalid input, incomplete input, unmappable
  * characters and small output buffers.
+  *
+ * ORACLE_PORTABLE: the output does not depend on the architecture.
  */
 #include <errno.h>
 #include <iconv.h>

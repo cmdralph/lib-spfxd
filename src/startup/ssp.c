@@ -12,6 +12,12 @@
 #include "libc.h"
 #include "pthread_impl.h"
 
+#if TLS_ABOVE_TP
+/* AArch64 compilers read the canary from this global (one value for all
+ * threads) instead of from the thread control block. */
+uintptr_t __stack_chk_guard;
+#endif
+
 hidden void __init_ssp(void *entropy)
 {
 	uintptr_t canary, secret;
@@ -24,6 +30,9 @@ hidden void __init_ssp(void *entropy)
 	}
 	canary &= ~(uintptr_t)0xff;
 	__self()->canary = canary;
+#if TLS_ABOVE_TP
+	__stack_chk_guard = canary;
+#endif
 	__libc.secret = secret | 1;
 }
 

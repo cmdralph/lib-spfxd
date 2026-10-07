@@ -4,4 +4,4 @@ MODES ?= static dynamic
 run:
 	@sh ./run.sh $(MODES)
 clean:
-	rm -rf out
+	rm -rf out out-*

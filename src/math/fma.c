@@ -1,7 +1,8 @@
 /*
  * lib-spfxd — fused multiply-add: fmaf, fma, fmal.
  *
- * On CPUs with FMA3 the instruction computes fma and fmaf.  Otherwise
+ * On x86-64 CPUs with FMA3, and always on AArch64, the instruction
+ * computes fma and fmaf.  Otherwise
  * (and for results that may need errno) x*y + z is computed exactly in
  * integer arithmetic: the product of the significands is exact
  * in 128 bits, the addend is aligned against it in a 256-bit accumulator
@@ -184,7 +185,10 @@ static long double fma_core(int sx, uint64_t mx, int ex, int sy, uint64_t my, in
 	return sR ? -r : r;
 }
 
-static const struct fmt F32 = { 24, -126, 127 }, F64 = { 53, -1022, 1023 }, F80 = { 64, -16382, 16383 };
+static const struct fmt F32 = { 24, -126, 127 }, F64 = { 53, -1022, 1023 };
+#if LDBL_MANT_DIG == 64
+static const struct fmt F80 = { 64, -16382, 16383 };
+#endif
 
 double fma(double x, double y, double z)
 {
@@ -195,6 +199,12 @@ double fma(double x, double y, double z)
 	if (likely(__cpu_features & 8 /* CPU_FMA */)) {
 		double r = z;
 		__asm__ ("vfmadd231sd %2, %1, %0" : "+x"(r) : "x"(x), "x"(y));
+		if (likely(__builtin_fabs(r) >= DBL_MIN && __builtin_fabs(r) <= DBL_MAX)) return r;
+	}
+#elif defined(__aarch64__)
+	{
+		double r;
+		__asm__ ("fmadd %d0, %d1, %d2, %d3" : "=w"(r) : "w"(x), "w"(y), "w"(z));
 		if (likely(__builtin_fabs(r) >= DBL_MIN && __builtin_fabs(r) <= DBL_MAX)) return r;
 	}
 #endif
@@ -218,6 +228,12 @@ float fmaf(float x, float y, float z)
 		__asm__ ("vfmadd231ss %2, %1, %0" : "+x"(r) : "x"(x), "x"(y));
 		if (likely(__builtin_fabsf(r) >= FLT_MIN && __builtin_fabsf(r) <= FLT_MAX)) return r;
 	}
+#elif defined(__aarch64__)
+	{
+		float r;
+		__asm__ ("fmadd %s0, %s1, %s2, %s3" : "=w"(r) : "w"(x), "w"(y), "w"(z));
+		if (likely(__builtin_fabsf(r) >= FLT_MIN && __builtin_fabsf(r) <= FLT_MAX)) return r;
+	}
 #endif
 	if (!__builtin_isfinite(x) || !__builtin_isfinite(y) || !__builtin_isfinite(z) || x == 0 || y == 0)
 		return x * y + z;
@@ -231,6 +247,8 @@ float fmaf(float x, float y, float z)
 	                       (int)(uz >> 31), mz, ez - 150, F32);
 }
 
+#if LDBL_MANT_DIG == 64
+/* x87 extended; the binary128 fmal is in ldbl128.c */
 long double fmal(long double x, long double y, long double z)
 {
 	if (!__builtin_isfinite(x) || !__builtin_isfinite(y) || !__builtin_isfinite(z) || x == 0 || y == 0)
@@ -243,3 +261,4 @@ long double fmal(long double x, long double y, long double z)
 	return fma_core(a.i.se >> 15, a.i.m, ex - 16446, b.i.se >> 15, b.i.m, ey - 16446,
 	                c.i.se >> 15, c.i.m, ez - 16446, F80);
 }
+#endif

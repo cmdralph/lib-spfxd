@@ -53,9 +53,16 @@ double erf(double x)
 		return x + x * (__two_over_sqrtpi[0] - 1.0);
 	}
 	if (a < 0.84375) {
-		double z = x * x;
+		/* x c0 + x^3 P1(x^2): x c0 and x^3 carried in dd, so only the
+		 * polynomial's own rounding and fit error remain */
+		dd_t z = two_prod(x, x);
+		dd_t q = two_prod(z.hi, poly(__erf_poly + 2, 9, z.hi));
+		q = dd_add_d(q, __erf_poly[1]);
+		dd_t x3 = two_prod(x, z.hi);
+		x3.lo += x * z.lo;
 		dd_t p = two_prod(x, __two_over_sqrtpi[0]);
-		p.lo += x * __two_over_sqrtpi[1] + x * z * poly(__erf_poly + 1, 10, z);
+		p.lo += x * __two_over_sqrtpi[1];
+		p = dd_add(p, dd_mul(x3, q));
 		return p.hi + p.lo;
 	}
 	if (a >= 6.0) {

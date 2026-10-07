@@ -25,7 +25,13 @@
 #define EPOLL_CTL_DEL 2
 #define EPOLL_CTL_MOD 3
 typedef union epoll_data { void *ptr; int fd; uint32_t u32; uint64_t u64; } epoll_data_t;
+/* The kernel packs this structure only on x86-64 (a historical quirk of
+ * that ABI); elsewhere it has natural alignment. */
+#ifdef __x86_64__
 struct epoll_event { uint32_t events; epoll_data_t data; } __attribute__((__packed__));
+#else
+struct epoll_event { uint32_t events; epoll_data_t data; };
+#endif
 __SPFXD_BEGIN_DECLS
 int epoll_create(int);
 int epoll_create1(int);

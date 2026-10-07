@@ -5,3 +5,6 @@
 /bench/bin/
 *.o
 bench/out/
+/build-*/
+/lib-*/
+/tests/out-*/

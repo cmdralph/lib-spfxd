@@ -120,12 +120,20 @@ static int big_any_below(const struct big *a, long i)
 	return 0;
 }
 
-/* Bits [lo, lo+64) as an integer (lo may be negative). */
-static uint64_t big_extract(const struct big *a, long lo, int cnt)
+typedef unsigned __int128 u128;
+
+/* Bits [lo, lo+cnt) as an integer, cnt <= 128 (lo may be negative). */
+static u128 big_extract(const struct big *a, long lo, int cnt)
 {
-	uint64_t r = 0;
-	for (int i = cnt - 1; i >= 0; i--) r = r << 1 | (uint64_t)big_bit(a, lo + i);
+	u128 r = 0;
+	for (int i = cnt - 1; i >= 0; i--) r = r << 1 | (u128)big_bit(a, lo + i);
 	return r;
+}
+
+static int bitlen128(u128 m)
+{
+	uint64_t hi = (uint64_t)(m >> 64);
+	return hi ? 128 - __builtin_clzll(hi) : m ? 64 - __builtin_clzll((uint64_t)m) : 0;
 }
 
 /*
@@ -224,19 +232,17 @@ struct fmt {
 static const struct fmt formats[3] = {
 	{ 24, -126, 127 },
 	{ 53, -1022, 1023 },
-	{ 64, -16382, 16383 },
+	{ LDBL_MANT_DIG, LDBL_MIN_EXP - 1, LDBL_MAX_EXP - 1 },   /* x87 64 bits or binary128 113 */
 };
 
 static int rounding_mode(void)
 {
-	unsigned csr;
-	__asm__ __volatile__ ("stmxcsr %0" : "=m"(csr));
-	return (int)((csr >> 13) & 3);       /* 0 nearest, 1 down, 2 up, 3 zero */
+	return __arch_round_mode();     /* 0 nearest, 1 down, 2 up, 3 zero */
 }
 
 /* Result: value = m * 2^e (m < 2^P), or an overflow/zero indication. */
 struct conv {
-	uint64_t m;
+	u128 m;
 	int e;
 	int inexact;
 	int tiny;       /* below the normal range before rounding */
@@ -266,43 +272,30 @@ static void round_big(const struct big *N, long s, int sticky, const struct fmt 
 		r->tiny = 1;
 	}
 	long cut = L - keep;         /* bits discarded */
-	uint64_t m;
+	u128 m;
 	if (cut <= 0) {
 		m = big_extract(N, 0, (int)L) << (-cut);
 		r->m = m;
 		r->e = (int)(s + cut);
 		r->inexact = sticky;
-		if (sticky && should_round_up(mode, neg, (int)(m & 1), 0, 1)) {
-			r->m++;
-			if (!r->m) {                 /* 64-bit significand wrapped */
-				r->m = 1ULL << 63;
-				r->e++;
-			}
-		}
+		if (sticky && should_round_up(mode, neg, (int)(m & 1), 0, 1)) r->m++;
 	} else {
 		m = keep > 0 ? big_extract(N, cut, (int)keep) : 0;
 		int half = big_bit(N, cut - 1);
 		int below = big_any_below(N, cut - 1) || sticky;
 		r->inexact = half || below;
 		r->e = (int)(s + cut);
-		if (should_round_up(mode, neg, (int)(m & 1), half, below)) {
-			m++;
-			if (!m) {                     /* 64-bit significand wrapped */
-				m = 1ULL << 63;
-				r->e++;
-			}
-		}
+		if (should_round_up(mode, neg, (int)(m & 1), half, below)) m++;
 		r->m = m;
 	}
-	/* carry out of the significand (P < 64; a 64-bit carry is handled
-	 * above, and shifting a uint64_t by 64 would be undefined) */
-	if (f->P < 64 && (r->m >> f->P)) {
+	/* carry out of the significand (P <= 113, so 128 bits never wrap) */
+	if (r->m >> f->P) {
 		r->m >>= 1;
 		r->e++;
 	}
 	/* leading-bit exponent of the result */
 	if (r->m) {
-		int lead = 63 - __builtin_clzll(r->m) + r->e;
+		int lead = bitlen128(r->m) - 1 + r->e;
 		if (lead > f->emax) r->overflow = 1;
 	}
 }
@@ -333,9 +326,9 @@ static long double make_value(const struct conv *c, int prec, int neg, int mode)
 	if (!c->m) return neg ? -0.0L : 0.0L;
 
 	/* normalize m to P bits; subnormals keep the minimum exponent */
-	uint64_t m = c->m;
+	u128 m = c->m;
 	int e = c->e;
-	int lead = 63 - __builtin_clzll(m);
+	int lead = bitlen128(m) - 1;
 	int shift = (f->P - 1) - lead;
 	int target_e = e - shift;                 /* value = (m<<shift) * 2^target_e */
 	int min_e = f->emin - (f->P - 1);
@@ -356,10 +349,18 @@ static long double make_value(const struct conv *c, int prec, int neg, int mode)
 		u.i = (m & 0xfffffffffffffULL) | (uint64_t)biased << 52 | (uint64_t)neg << 63;
 		return u.f;
 	}
+#if LDBL_MANT_DIG == 64
 	union { long double f; struct { uint64_t m; uint16_t se; } i; } u;
-	u.i.m = m;
+	memset(&u, 0, sizeof u);
+	u.i.m = (uint64_t)m;
 	u.i.se = (uint16_t)(biased | neg << 15);
 	return u.f;
+#else
+	u128 bits = (m & (((u128)1 << 112) - 1)) | (u128)biased << 112 | (u128)neg << 127;
+	long double v;
+	memcpy(&v, &bits, sizeof v);
+	return v;
+#endif
 }
 
 /* ---------------------------------------------------------------------- */
@@ -465,7 +466,9 @@ static long double decimal_to_fp(const char *digits, int ndig, long e10, int sti
 	/* Out-of-range shortcuts keep the big integers bounded. */
 	long top = e10 + ndig;                  /* value < 10^top */
 	long max10 = prec == 0 ? 39 : prec == 1 ? 310 : 4933;
-	long min10 = prec == 0 ? -46 : prec == 1 ? -324 : -4952;
+	/* below 10^min10 every value rounds to 0 or the smallest subnormal
+	 * (2^-149, 2^-1074, 2^-16445 x87, 2^-16494 binary128) */
+	long min10 = prec == 0 ? -46 : prec == 1 ? -324 : LDBL_MANT_DIG == 113 ? -4967 : -4952;
 	struct conv c;
 	memset(&c, 0, sizeof c);
 	if (top > max10) {
@@ -597,7 +600,7 @@ hidden long double __strtold_internal(const char *restrict s0, char **restrict e
 {
 	const char *s = s0;
 	int neg = 0, n;
-	const int maxdig = prec == 2 ? 11600 : 800;
+	const int maxdig = prec == 2 ? (LDBL_MANT_DIG == 113 ? 11700 : 11600) : 800;
 
 	while (isspace((unsigned char)*s)) s++;
 	if (*s == '+' || *s == '-') neg = *s++ == '-';
