@@ -1083,6 +1083,9 @@ _Noreturn void __dls3(size_t *sp)
 	if (!__libc.secure) {
 		char *e = getenv("LD_LIBRARY_PATH");
 		if (e) env_path = e;
+		/* the ldd convention: list the dependencies instead of running */
+		e = getenv("LD_TRACE_LOADED_OBJECTS");
+		if (e && *e && strcmp(e, "0")) ldd_mode = 1;
 	}
 
 	struct dso *app;

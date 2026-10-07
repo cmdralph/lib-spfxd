@@ -41,6 +41,51 @@ static int start(void *arg)
 	return 0;
 }
 
+/*
+ * Stack cache.  Creating a thread costs an mmap and an mprotect, joining
+ * it an munmap; a short-lived thread spends most of its life in those
+ * calls.  The mappings of up to STACK_CACHE joined threads are kept and
+ * reused for a new thread with the same stack and guard size.  Their
+ * TLS/TCB region is cleared before reuse, so a reused thread starts
+ * exactly as on a fresh mapping (only stale stack contents remain, as
+ * with any stack).  Detached threads unmap their own stack and are never
+ * cached.
+ */
+#define STACK_CACHE 4
+static struct { unsigned char *map; size_t size, guard; } stack_cache[STACK_CACHE];
+static volatile int stack_cache_lock;
+
+static unsigned char *stack_cache_get(size_t size, size_t guard)
+{
+	unsigned char *m = 0;
+	LOCK(&stack_cache_lock);
+	for (int i = 0; i < STACK_CACHE; i++) {
+		if (stack_cache[i].map && stack_cache[i].size == size && stack_cache[i].guard == guard) {
+			m = stack_cache[i].map;
+			stack_cache[i].map = 0;
+			break;
+		}
+	}
+	UNLOCK(&stack_cache_lock);
+	return m;
+}
+
+static int stack_cache_put(unsigned char *map, size_t size, size_t guard)
+{
+	int done = 0;
+	LOCK(&stack_cache_lock);
+	for (int i = 0; i < STACK_CACHE && !done; i++) {
+		if (!stack_cache[i].map) {
+			stack_cache[i].map = map;
+			stack_cache[i].size = size;
+			stack_cache[i].guard = guard;
+			done = 1;
+		}
+	}
+	UNLOCK(&stack_cache_lock);
+	return done;
+}
+
 int pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict attrp,
 	void *(*entry)(void *), void *restrict arg)
 {
@@ -73,11 +118,16 @@ int pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict attrp
 		stack_size = (stack_size + page - 1) & -page;
 		if (stack_size > SIZE_MAX / 2 || tls_size > SIZE_MAX / 4) return EINVAL;
 		map_size = guard + stack_size + ((tls_size + page - 1) & -page);
-		map = mmap(0, map_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-		if (map == MAP_FAILED) return EAGAIN;
-		if (mprotect(map + guard, map_size - guard, PROT_READ | PROT_WRITE)) {
-			munmap(map, map_size);
-			return EAGAIN;
+		size_t tls_pages = (tls_size + page - 1) & -page;
+		if ((map = stack_cache_get(map_size, guard))) {
+			memset(map + map_size - tls_pages, 0, tls_pages);
+		} else {
+			map = mmap(0, map_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+			if (map == MAP_FAILED) return EAGAIN;
+			if (mprotect(map + guard, map_size - guard, PROT_READ | PROT_WRITE)) {
+				munmap(map, map_size);
+				return EAGAIN;
+			}
 		}
 		tls_mem = map + map_size - tls_size;
 		tls_mem = (unsigned char *)((uintptr_t)tls_mem & -(uintptr_t)16);
@@ -90,6 +140,7 @@ int pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict attrp
 	td->stack = (void *)((uintptr_t)stack_top & -(uintptr_t)16);
 	td->stack_size = attr.__stackaddr ? attr.__stacksize : stack_size;
 	td->guard_size = guard;
+	td->stack_cacheable = !attr.__stackaddr;
 	td->start = entry;
 	td->start_arg = arg;
 	td->detach_state = attr.__detach ? DT_DETACHED : DT_JOINABLE;
@@ -190,7 +241,8 @@ static int join_common(struct pthread *t, void **res, const struct timespec *at,
 		if (r == ETIMEDOUT || r == EINVAL) return r;
 	}
 	if (res) *res = t->result;
-	if (t->map_base) munmap(t->map_base, t->map_size);
+	if (t->map_base && !(t->stack_cacheable && stack_cache_put(t->map_base, t->map_size, t->guard_size)))
+		munmap(t->map_base, t->map_size);
 	return 0;
 }
 

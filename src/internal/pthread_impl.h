@@ -69,6 +69,7 @@ struct pthread {
 	void *tsd[PTHREAD_KEYS_MAX];
 	char name[16];
 	char strerror_buf[48];
+	int stack_cacheable;              /* map_base is a library-made stack mapping */
 };
 
 static __inline struct pthread *__self(void)

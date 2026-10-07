@@ -138,6 +138,23 @@ static int c11_waiter(void *a)
 	return (int)(long)a;
 }
 
+/* Reused thread stacks (the stack cache) must look fresh: initialized
+ * and zero-initialized TLS, errno and thread-specific data. */
+static _Thread_local int tls_init_42 = 42;
+static _Thread_local long tls_zero;
+static pthread_key_t fresh_key;
+
+static void *fresh_thread(void *arg)
+{
+	int ok = tls_init_42 == 42 && tls_zero == 0 && errno == 0 &&
+	         pthread_getspecific(fresh_key) == 0;
+	tls_init_42 = 7;
+	tls_zero = 99;
+	errno = 1234;
+	pthread_setspecific(fresh_key, (void *)arg);
+	return (void *)(long)ok;
+}
+
 int main(void)
 {
 	void *r;
@@ -310,6 +327,18 @@ int main(void)
 		CHECK(!pthread_create(&t[0], 0, tls_thread, (void *)(long)(round + 1)), "create %d", round);
 		pthread_join(t[0], &r);
 		if (r) { CHECK(0, "reused thread state round %d", round); break; }
+	}
+	{
+		pthread_key_create(&fresh_key, 0);
+		int fresh = 1;
+		for (int i = 0; i < 50; i++) {
+			pthread_t ft;
+			void *ok;
+			pthread_create(&ft, 0, fresh_thread, (void *)1);
+			pthread_join(ft, &ok);
+			fresh &= ok != 0;
+		}
+		CHECK(fresh, "threads on reused stacks start with fresh TLS, errno and TSD");
 	}
 	return DONE();
 }

@@ -189,6 +189,11 @@ hidden int __pthread_mutex_unlock_internal(pthread_mutex_t *m)
 
 int pthread_mutex_unlock(pthread_mutex_t *m)
 {
+	/* normal mutexes: one exchange, a wake only if someone sleeps */
+	if ((m->__type & MT_TYPE_MASK) == PTHREAD_MUTEX_NORMAL) {
+		if (a_swap(&m->__lock, 0) == 2) __futex_wake(&m->__lock, 1, priv(m));
+		return 0;
+	}
 	return __pthread_mutex_unlock_internal(m);
 }
 
