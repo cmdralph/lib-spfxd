@@ -27,6 +27,7 @@ _Noreturn void _Exit(int code)
 weak_alias(_Exit, _exit);
 
 static volatile int exit_owner;
+hidden int __exit_status;        /* passed to on_exit handlers */
 
 _Noreturn void exit(int code)
 {
@@ -37,6 +38,7 @@ _Noreturn void exit(int code)
 	if (owner && owner != tid)
 		for (;;) __syscall(SYS_pause);
 
+	__exit_status = code;
 	__funcs_on_exit();
 	__libc_exit_fini();
 	__stdio_exit();

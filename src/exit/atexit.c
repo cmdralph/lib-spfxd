@@ -19,19 +19,20 @@ struct fn_block {
 	struct fn_block *next;
 	int used;
 	int cap;
-	struct { void (*f)(void *); void *arg; void *dso; } e[];
+	struct { void (*f)(void *); void *arg; void *dso; void (*on)(int, void *); } e[];
 };
 
 static struct {
 	struct fn_block hdr;
-	char storage[FN_PER_BLOCK * 3 * sizeof(void *)];
+	char storage[FN_PER_BLOCK * 4 * sizeof(void *)];
 } builtin = { { 0, 0, FN_PER_BLOCK }, { 0 } };
 
 static struct fn_block *head;
 static volatile int lock;
 static unsigned generation;  /* bumped by every registration */
+extern hidden int __exit_status;   /* exit()'s argument (exit.c) */
 
-int __cxa_atexit(void (*func)(void *), void *arg, void *dso)
+static int add(void (*func)(void *), void *arg, void *dso, void (*on)(int, void *))
 {
 	__lock_always(&lock);
 	if (!head) head = &builtin.hdr;
@@ -43,7 +44,7 @@ int __cxa_atexit(void (*func)(void *), void *arg, void *dso)
 			return -1;
 		}
 		struct fn_block *b = (struct fn_block *)r;
-		b->cap = (int)((4096 - sizeof *b) / (3 * sizeof(void *)));
+		b->cap = (int)((4096 - sizeof *b) / sizeof b->e[0]);
 		b->used = 0;
 		b->next = head;
 		head = b;
@@ -51,10 +52,16 @@ int __cxa_atexit(void (*func)(void *), void *arg, void *dso)
 	head->e[head->used].f = func;
 	head->e[head->used].arg = arg;
 	head->e[head->used].dso = dso;
+	head->e[head->used].on = on;
 	head->used++;
 	generation++;
 	__unlock_always(&lock);
 	return 0;
+}
+
+int __cxa_atexit(void (*func)(void *), void *arg, void *dso)
+{
+	return add(func, arg, dso, 0);
 }
 
 static void call_plain(void *p)
@@ -67,6 +74,12 @@ int atexit(void (*func)(void))
 	return __cxa_atexit(call_plain, (void *)func, 0);
 }
 
+/* GNU: the handler also receives the exit status. */
+int on_exit(void (*func)(int, void *), void *arg)
+{
+	return add(0, arg, 0, func);
+}
+
 /* Run (and retire) handlers belonging to dso, or all handlers if dso is 0.
  * The lock is dropped around each call so handlers may call atexit. */
 void __cxa_finalize(void *dso)
@@ -75,12 +88,15 @@ void __cxa_finalize(void *dso)
 	for (struct fn_block *b = head; b; b = b->next) {
 		for (int i = b->used; i-- > 0; ) {
 			void (*f)(void *) = b->e[i].f;
-			if (!f || (dso && b->e[i].dso != dso)) continue;
+			void (*on)(int, void *) = b->e[i].on;
+			if ((!f && !on) || (dso && b->e[i].dso != dso)) continue;
 			void *arg = b->e[i].arg;
 			unsigned gen = generation;
 			b->e[i].f = 0;
+			b->e[i].on = 0;
 			__unlock_always(&lock);
-			f(arg);
+			if (on) on(__exit_status, arg);
+			else f(arg);
 			__lock_always(&lock);
 			/* A handler registered new handlers: they run next. */
 			if (gen != generation) {

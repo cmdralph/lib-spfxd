@@ -135,6 +135,7 @@ unsigned arc4random_uniform(unsigned);
 #endif
 
 #if defined(__SPFXD_GNU)
+int on_exit(void (*)(int, void *), void *);
 char *secure_getenv(const char *);
 int ptsname_r(int, char *, size_t);
 char *canonicalize_file_name(const char *);

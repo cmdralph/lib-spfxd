@@ -6,6 +6,7 @@
  * cannot reproduce it.  The second 8 random bytes seed the library's
  * pointer-hardening secret (used by the allocator's free lists).
  */
+#include <signal.h>
 #include <string.h>
 #include <unistd.h>
 #include "libc.h"
@@ -26,10 +27,18 @@ hidden void __init_ssp(void *entropy)
 	__libc.secret = secret | 1;
 }
 
+/* The stack is known to be corrupt: use raw system calls only.  The
+ * process dies by SIGABRT (default action restored, signal unblocked),
+ * as glibc's does, so debuggers and supervisors see the usual cause. */
 void __stack_chk_fail(void)
 {
 	static const char msg[] = "*** stack smashing detected ***: terminated\n";
 	__syscall(SYS_write, 2, msg, sizeof msg - 1);
+	struct { void *handler; unsigned long flags; void *restorer; unsigned long mask; } dfl = { 0, 0, 0, 0 };
+	unsigned long abrt = 1UL << (SIGABRT - 1);
+	__syscall(SYS_rt_sigaction, SIGABRT, &dfl, 0, 8);
+	__syscall(SYS_rt_sigprocmask, SIG_UNBLOCK, &abrt, 0, 8);
+	__syscall(SYS_tkill, __syscall(SYS_gettid), SIGABRT);
 	a_crash();
 }
 
