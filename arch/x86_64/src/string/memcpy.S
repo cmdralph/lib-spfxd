@@ -1,5 +1,5 @@
 /*
- * lib-spfxd — memcpy (x86-64, SSE2).
+ * lib-spfxd — memcpy (x86-64, SSE2 baseline and AVX2).
  *
  *   n < 16       two possibly overlapping scalar moves of 8/4/2/1 bytes
  *   16..128      2, 4 or 8 possibly overlapping 16-byte moves, all loads
@@ -12,7 +12,12 @@
  * Every path loads all data it will later store over before storing, or
  * copies strictly forward, so the same code is a correct forward memmove
  * (dst <= src, or no overlap); memmove.S jumps to __memcpy_fwd for that.
+ *
+ * With AVX2, sizes 33..2047 use 32-byte moves under the same rules: up to
+ * 256 bytes as overlapping head/tail vectors, beyond that a 128-byte loop
+ * with 32-byte-aligned stores.
  */
+#include "cpu.h"
 	.text
 	.global memcpy
 	.global __memcpy_fwd
@@ -65,6 +70,10 @@ __memcpy_fwd:
 1:	ret
 
 .Lover32:
+	cmp $2048,%rdx
+	jae .Lrep
+	testb $CPU_AVX2,__cpu_features(%rip)
+	jnz .Lavx2
 	cmp $64,%rdx
 	ja .Lover64
 	movdqu (%rsi),%xmm0
@@ -141,6 +150,86 @@ __memcpy_fwd:
 .Lrep:
 	mov %rdx,%rcx
 	rep movsb
+	ret
+
+	/* AVX2, 33 <= n < 2048 */
+	.p2align 4
+.Lavx2:
+	cmp $64,%rdx
+	ja 1f
+	vmovdqu (%rsi),%ymm0
+	vmovdqu -32(%rsi,%rdx),%ymm1
+	vmovdqu %ymm0,(%rdi)
+	vmovdqu %ymm1,-32(%rdi,%rdx)
+	vzeroupper
+	ret
+1:	cmp $128,%rdx
+	ja 1f
+	vmovdqu (%rsi),%ymm0
+	vmovdqu 32(%rsi),%ymm1
+	vmovdqu -64(%rsi,%rdx),%ymm2
+	vmovdqu -32(%rsi,%rdx),%ymm3
+	vmovdqu %ymm0,(%rdi)
+	vmovdqu %ymm1,32(%rdi)
+	vmovdqu %ymm2,-64(%rdi,%rdx)
+	vmovdqu %ymm3,-32(%rdi,%rdx)
+	vzeroupper
+	ret
+1:	cmp $256,%rdx
+	ja .La_loop
+	vmovdqu (%rsi),%ymm0
+	vmovdqu 32(%rsi),%ymm1
+	vmovdqu 64(%rsi),%ymm2
+	vmovdqu 96(%rsi),%ymm3
+	vmovdqu -128(%rsi,%rdx),%ymm4
+	vmovdqu -96(%rsi,%rdx),%ymm5
+	vmovdqu -64(%rsi,%rdx),%ymm6
+	vmovdqu -32(%rsi,%rdx),%ymm7
+	vmovdqu %ymm0,(%rdi)
+	vmovdqu %ymm1,32(%rdi)
+	vmovdqu %ymm2,64(%rdi)
+	vmovdqu %ymm3,96(%rdi)
+	vmovdqu %ymm4,-128(%rdi,%rdx)
+	vmovdqu %ymm5,-96(%rdi,%rdx)
+	vmovdqu %ymm6,-64(%rdi,%rdx)
+	vmovdqu %ymm7,-32(%rdi,%rdx)
+	vzeroupper
+	ret
+.La_loop:
+	vmovdqu (%rsi),%ymm8
+	lea (%rsi,%rdx),%r9               /* src end */
+	lea (%rdi,%rdx),%r10              /* dst end */
+	vmovdqu -128(%r9),%ymm4
+	vmovdqu -96(%r9),%ymm5
+	vmovdqu -64(%r9),%ymm6
+	vmovdqu -32(%r9),%ymm7
+	mov %rdi,%rcx
+	neg %rcx
+	and $31,%ecx
+	lea (%rdi,%rcx),%r11              /* 32-byte-aligned dst cursor */
+	add %rcx,%rsi
+	sub %rcx,%rdx
+	.p2align 4
+2:	cmp $128,%rdx
+	jbe 3f
+	vmovdqu (%rsi),%ymm0
+	vmovdqu 32(%rsi),%ymm1
+	vmovdqu 64(%rsi),%ymm2
+	vmovdqu 96(%rsi),%ymm3
+	vmovdqa %ymm0,(%r11)
+	vmovdqa %ymm1,32(%r11)
+	vmovdqa %ymm2,64(%r11)
+	vmovdqa %ymm3,96(%r11)
+	sub $-128,%rsi
+	sub $-128,%r11
+	add $-128,%rdx
+	jmp 2b
+3:	vmovdqu %ymm4,-128(%r10)
+	vmovdqu %ymm5,-96(%r10)
+	vmovdqu %ymm6,-64(%r10)
+	vmovdqu %ymm7,-32(%r10)
+	vmovdqu %ymm8,(%rdi)
+	vzeroupper
 	ret
 	.size memcpy,.-memcpy
 	.size __memcpy_fwd,.-__memcpy_fwd

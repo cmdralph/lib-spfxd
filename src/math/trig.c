@@ -39,6 +39,27 @@ double __cos_kernel(dd_t r)
 	return c.hi + c.lo;
 }
 
+/* Branch-free quadrant handling: the quadrant of a random argument is
+ * unpredictable, so both kernels are evaluated (they are independent and
+ * overlap in the pipeline) and the result is selected with bit masks. */
+static always_inline double pick(int odd, double a, double b)
+{
+	uint64_t m = -(uint64_t)(odd & 1);
+	return asdouble((asuint64(b) & m) | (asuint64(a) & ~m));
+}
+
+static always_inline double negate_if(int c, double v)
+{
+	return asdouble(asuint64(v) ^ ((uint64_t)(c != 0) << 63));
+}
+
+/* sin(n pi/2 + r) */
+static always_inline double sin_quadrant(int n, dd_t r)
+{
+	double s = __sin_kernel(r), c = __cos_kernel(r);
+	return negate_if(n & 2, pick(n, s, c));
+}
+
 double sin(double x)
 {
 	uint32_t top = TOP12(x) & 0x7ff;
@@ -50,12 +71,7 @@ double sin(double x)
 	if (top >= 0x7ff) return __math_invalid(x);
 	dd_t r;
 	int n = __rem_pio2(x, &r);
-	switch (n & 3) {
-	case 0: return __sin_kernel(r);
-	case 1: return __cos_kernel(r);
-	case 2: return -__sin_kernel(r);
-	default: return -__cos_kernel(r);
-	}
+	return sin_quadrant(n, r);
 }
 
 double cos(double x)
@@ -68,12 +84,7 @@ double cos(double x)
 	if (top >= 0x7ff) return __math_invalid(x);
 	dd_t r;
 	int n = __rem_pio2(x, &r);
-	switch (n & 3) {
-	case 0: return __cos_kernel(r);
-	case 1: return -__sin_kernel(r);
-	case 2: return -__cos_kernel(r);
-	default: return __sin_kernel(r);
-	}
+	return sin_quadrant(n + 1, r);           /* cos x = sin(x + pi/2) */
 }
 
 void sincos(double x, double *s, double *c)
@@ -93,12 +104,8 @@ void sincos(double x, double *s, double *c)
 	dd_t r;
 	int n = __rem_pio2(x, &r);
 	double sv = __sin_kernel(r), cv = __cos_kernel(r);
-	switch (n & 3) {
-	case 0: *s = sv; *c = cv; break;
-	case 1: *s = cv; *c = -sv; break;
-	case 2: *s = -sv; *c = -cv; break;
-	default: *s = -cv; *c = sv; break;
-	}
+	*s = negate_if(n & 2, pick(n, sv, cv));
+	*c = negate_if((n + 1) & 2, pick(n, cv, sv));
 }
 
 double tan(double x)
@@ -113,8 +120,11 @@ double tan(double x)
 	dd_t r;
 	int n = __rem_pio2(x, &r);
 	dd_t s = __sin_dd(r), c = __cos_dd(r);
-	dd_t t = (n & 1) ? dd_neg(dd_div(c, s)) : dd_div(s, c);
-	return t.hi + t.lo;
+	/* tan = s/c in even quadrants, -c/s in odd ones */
+	dd_t num = { pick(n, s.hi, c.hi), pick(n, s.lo, c.lo) };
+	dd_t den = { pick(n, c.hi, s.hi), pick(n, c.lo, s.lo) };
+	dd_t t = dd_div(num, den);
+	return negate_if(n & 1, t.hi + t.lo);
 }
 
 /* sin(pi x): x = k/2 + r exactly with |r| <= 1/4 */
@@ -127,7 +137,7 @@ dd_t __sinpi_dd(double x)
 		kd = 2.0 * x;
 		rr = 0.0;
 	} else {
-		kd = (double)(int64_t)(2.0 * x + (x < 0 ? -0.5 : 0.5));
+		kd = (double)(int64_t)(2.0 * x + __builtin_copysign(0.5, x));
 		rr = x - 0.5 * kd;
 	}
 	int64_t k = (int64_t)kd;

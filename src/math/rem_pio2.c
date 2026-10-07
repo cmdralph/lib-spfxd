@@ -100,13 +100,10 @@ static int rem_pio2_large(double x, dd_t *r)
 int __rem_pio2(double x, dd_t *r)
 {
 	double ax = fabs(x);
-	if (ax <= 0x1.921fb54442d18p-1) {          /* pi/4 */
-		*r = dd_from(x);
-		return 0;
-	}
-	if (ax < 0x1.921fb54442d18p20) {
+	/* (|x| <= pi/4 needs no special case: n = 0 and r = x exactly) */
+	if (likely(ax < 0x1.921fb54442d18p20)) {
 		double z = x * __two_over_pi;
-		int n = (int)(z + (z < 0 ? -0.5 : 0.5));
+		int n = iround(z);
 		double nd = (double)n;
 		double y1 = x - nd * __pio2_split[0];
 		dd_t a = two_sum(y1, -nd * __pio2_split[1]);

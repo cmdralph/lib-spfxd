@@ -14,15 +14,9 @@
 #include <math.h>
 #include "fp.h"
 
-/* Nearest integer to z (|z| < 2^30) independent of the rounding mode. */
-static always_inline int nearest_int(double z)
-{
-	return (int)(z + (z < 0 ? -0.5 : 0.5));
-}
-
 dd_t __exp_dd_kernel(dd_t x, int *scale)
 {
-	int k = nearest_int(x.hi * __exp_inv_ln2_32);
+	int k = iround(x.hi * __exp_inv_ln2_32);
 	double kd = (double)k;
 	/* k*ln2_32[0] is exact (37-bit constant, |k| < 2^16) and so is the
 	 * subtraction (the operands are within a factor of two) */

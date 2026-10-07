@@ -1,5 +1,5 @@
 /*
- * lib-spfxd — memmove (x86-64, SSE2).
+ * lib-spfxd — memmove (x86-64, SSE2 baseline and AVX2).
  *
  * If dst is below src, or the regions do not overlap, memcpy's code is a
  * correct forward copy (see memcpy.S).  Sizes up to 128 are also handled
@@ -7,8 +7,10 @@
  * (dst > src with overlap, n > 128) copy backward: the first 64 bytes and
  * the unaligned last 16 are loaded up front, the body is copied from the
  * end in 64-byte steps with 16-byte-aligned stores, then the saved head and
- * tail are written.
+ * tail are written.  The AVX2 variant does the same with the first 128
+ * bytes saved and 128-byte steps of 32-byte-aligned stores.
  */
+#include "cpu.h"
 	.text
 	.global memmove
 	.type memmove,@function
@@ -21,6 +23,8 @@ memmove:
 	cmp $128,%rdx
 	jbe __memcpy_fwd
 	mov %rdi,%rax
+	testb $CPU_AVX2,__cpu_features(%rip)
+	jnz .Lavx2
 	/* save the first 64 source bytes and the last 16 */
 	movdqu (%rsi),%xmm4
 	movdqu 16(%rsi),%xmm5
@@ -56,6 +60,44 @@ memmove:
 	movdqu %xmm6,32(%rdi)
 	movdqu %xmm7,48(%rdi)
 	movdqu %xmm8,-16(%r8)
+	ret
+
+	.p2align 4
+.Lavx2:
+	vmovdqu (%rsi),%ymm4
+	vmovdqu 32(%rsi),%ymm5
+	vmovdqu 64(%rsi),%ymm6
+	vmovdqu 96(%rsi),%ymm7
+	vmovdqu -32(%rsi,%rdx),%ymm8
+	lea (%rdi,%rdx),%r10               /* dst end */
+	mov %r10,%r8
+	lea (%rsi,%rdx),%r9                /* src end */
+	mov %r10,%rcx
+	and $31,%ecx
+	sub %rcx,%r10
+	sub %rcx,%r9
+	sub %rcx,%rdx
+	.p2align 4
+1:	cmp $128,%rdx
+	jbe 2f
+	vmovdqu -32(%r9),%ymm0
+	vmovdqu -64(%r9),%ymm1
+	vmovdqu -96(%r9),%ymm2
+	vmovdqu -128(%r9),%ymm3
+	vmovdqa %ymm0,-32(%r10)
+	vmovdqa %ymm1,-64(%r10)
+	vmovdqa %ymm2,-96(%r10)
+	vmovdqa %ymm3,-128(%r10)
+	add $-128,%r9
+	add $-128,%r10
+	add $-128,%rdx
+	jmp 1b
+2:	vmovdqu %ymm4,(%rdi)
+	vmovdqu %ymm5,32(%rdi)
+	vmovdqu %ymm6,64(%rdi)
+	vmovdqu %ymm7,96(%rdi)
+	vmovdqu %ymm8,-32(%r8)
+	vzeroupper
 	ret
 	.size memmove,.-memmove
 	.section .note.GNU-stack,"",@progbits

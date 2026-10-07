@@ -1,17 +1,23 @@
 /*
- * lib-spfxd — strlen (x86-64, SSE2).
+ * lib-spfxd — strlen (x86-64, SSE2 baseline and AVX2).
  *
  * Only aligned 16-byte loads are used, so no load crosses a page boundary
  * and nothing past the terminator's page is touched.  The first block is
  * masked to ignore bytes before the start; after reaching 64-byte
  * alignment the loop examines 64 bytes per iteration by folding four
  * vectors with pminub (a zero byte survives the minimum).
+ *
+ * The AVX2 variant (chosen at run time from __cpu_features) does the same
+ * with 32-byte vectors and 128 bytes per iteration.
  */
+#include "cpu.h"
 	.text
 	.global strlen
 	.type strlen,@function
 	.p2align 5
 strlen:
+	testb $CPU_AVX2,__cpu_features(%rip)
+	jnz .Lavx2
 	pxor %xmm0,%xmm0
 	mov %edi,%ecx
 	and $15,%ecx
@@ -80,6 +86,67 @@ strlen:
 
 .Lhead:
 	bsf %edx,%eax
+	ret
+
+	.p2align 5
+.Lavx2:
+	vpxor %xmm0,%xmm0,%xmm0
+	mov %edi,%ecx
+	and $31,%ecx
+	mov %rdi,%rax
+	and $-32,%rax
+	vpcmpeqb (%rax),%ymm0,%ymm1
+	vpmovmskb %ymm1,%edx
+	shr %cl,%edx
+	test %edx,%edx
+	jnz .La_head
+	/* 32-byte steps up to 128-byte alignment */
+1:	add $32,%rax
+	test $127,%al
+	jz .La_loop
+	vpcmpeqb (%rax),%ymm0,%ymm1
+	vpmovmskb %ymm1,%edx
+	test %edx,%edx
+	jz 1b
+	jmp .La_found
+
+	.p2align 5
+.La_loop:
+	vmovdqa (%rax),%ymm1
+	vpminub 32(%rax),%ymm1,%ymm2
+	vmovdqa 64(%rax),%ymm3
+	vpminub 96(%rax),%ymm3,%ymm4
+	vpminub %ymm2,%ymm4,%ymm4
+	vpcmpeqb %ymm0,%ymm4,%ymm4
+	vpmovmskb %ymm4,%edx
+	sub $-128,%rax
+	test %edx,%edx
+	jz .La_loop
+	add $-128,%rax
+.La_tail:
+	vpcmpeqb (%rax),%ymm0,%ymm1
+	vpmovmskb %ymm1,%ecx
+	vpcmpeqb 32(%rax),%ymm0,%ymm1
+	vpmovmskb %ymm1,%edx
+	shl $32,%rdx
+	or %rcx,%rdx
+	jnz .La_found
+	vpcmpeqb 64(%rax),%ymm0,%ymm1
+	vpmovmskb %ymm1,%ecx
+	vpcmpeqb 96(%rax),%ymm0,%ymm1
+	vpmovmskb %ymm1,%edx
+	shl $32,%rdx
+	or %rcx,%rdx
+	add $64,%rax
+.La_found:
+	bsf %rdx,%rdx
+	add %rdx,%rax
+	sub %rdi,%rax
+	vzeroupper
+	ret
+.La_head:
+	bsf %edx,%eax
+	vzeroupper
 	ret
 	.size strlen,.-strlen
 	.section .note.GNU-stack,"",@progbits

@@ -128,6 +128,40 @@ int main(void)
 		memcpy(u, s, (size_t)len + 1);
 		CHECK(strcmp(s, u) == 0 && strcmp(u, s) == 0, "page strcmp mixed %d", len);
 	}
+	/* long operands: strcmp across several pages with unequal page
+	 * offsets, and the 128-byte vector loops of the other functions */
+	static unsigned char L1[20480], L2[20480], L3[20480], R[20480];
+	for (int trial = 0; trial < 3000; trial++) {
+		int len = (int)(rnd() % 9000), a = (int)(rnd() % 4096), b = (int)(rnd() % 4096);
+		for (int i = 0; i < len; i++) L1[a + i] = L2[b + i] = (unsigned char)(2 + rnd() % 254);
+		L1[a + len] = L2[b + len] = 0;
+		const char *s = (const char *)L1 + a, *t = (const char *)L2 + b;
+		CHECK(strlen(s) == (size_t)len, "long strlen %d", len);
+		CHECK(strcmp(s, t) == 0, "long strcmp eq %d a %d b %d", len, a, b);
+		CHECK(memcmp(s, t, (size_t)len) == 0, "long memcmp eq %d", len);
+		CHECK(memchr(s, 1, (size_t)len) == 0 && strchr(s, 1) == 0, "long no match %d", len);
+		if (len) {
+			int q = (int)(rnd() % (unsigned)len);
+			L1[a + q] = 1;
+			CHECK(memchr(s, 1, (size_t)len) == s + q, "long memchr %d q %d", len, q);
+			CHECK(memchr(s, 1, (size_t)q) == 0, "long memchr bound %d q %d", len, q);
+			CHECK(strchr(s, 1) == s + q && strchrnul(s, 1) == s + q, "long strchr %d q %d", len, q);
+			CHECK(sgn(strcmp(s, t)) == sgn(ref_strcmp(s, t)), "long strcmp diff %d q %d", len, q);
+			CHECK(sgn(memcmp(s, t, (size_t)len)) == sgn(ref_memcmp(s, t, (size_t)len)), "long memcmp diff %d", len);
+			L1[a + q] = L2[b + q];
+		}
+		int n = (int)(rnd() % 2200), sa = (int)(rnd() % 64), da = (int)(rnd() % 64);
+		for (int i = 0; i < n + 128; i++) R[i] = L3[i] = (unsigned char)rnd();
+		memcpy(L3 + da, L1 + sa, (size_t)n);
+		for (int i = 0; i < n; i++) R[da + i] = L1[sa + i];
+		CHECK(!ref_memcmp(L3, R, (size_t)n + 128), "long memcpy %d", n);
+		int off = (int)(rnd() % 257) - 128, src = 200;
+		for (int i = 0; i < n + 600; i++) R[i] = L3[i] = (unsigned char)rnd();
+		memmove(L3 + src + off, L3 + src, (size_t)n);
+		for (int i = 0; i < n; i++) L2[i] = R[src + i];
+		for (int i = 0; i < n; i++) R[src + off + i] = L2[i];
+		CHECK(!ref_memcmp(L3, R, (size_t)n + 600), "long memmove %d off %d", n, off);
+	}
 	printf("%s: %d failures\n", __FILE__, fails);
 	return fails != 0;
 }

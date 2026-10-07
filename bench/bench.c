@@ -21,7 +21,7 @@
 #include <string.h>
 #include <time.h>
 
-#define REPS 5
+#define REPS 7
 
 static volatile uint64_t sink;          /* defeats dead-code elimination */
 static const char *filter;

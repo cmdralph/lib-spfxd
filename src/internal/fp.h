@@ -120,19 +120,36 @@ static always_inline dd_t fast_two_sum(double a, double b)
 	return (dd_t){ s, b - (s - a) };
 }
 
-/* p + e == a * b exactly (barring underflow), p = fl(a * b).  Without a
- * hardware FMA the operands are split into 26-bit halves (Veltkamp). */
-static always_inline dd_t two_prod(double a, double b)
+/* p + e == a * b exactly (barring underflow), p = fl(a * b).  The error
+ * term comes from a hardware FMA when the CPU has one (checked at run
+ * time on x86-64; the branch is perfectly predictable), otherwise from
+ * splitting the operands into 26-bit halves (Veltkamp/Dekker).  Both are
+ * exact, so results do not depend on which is used. */
+static always_inline double two_prod_err_split(double a, double b, double p)
 {
-	double p = a * b;
-#ifdef __FMA__
-	double e = __builtin_fma(a, b, -p);
-#else
 	const double split = 134217729.0;   /* 2^27 + 1 */
 	double ca = split * a, cb = split * b;
 	double ah = ca - (ca - a), al = a - ah;
 	double bh = cb - (cb - b), bl = b - bh;
-	double e = ((ah * bh - p) + ah * bl + al * bh) + al * bl;
+	return ((ah * bh - p) + ah * bl + al * bh) + al * bl;
+}
+
+static always_inline dd_t two_prod(double a, double b)
+{
+	double p = a * b;
+#if defined(__FMA__)
+	double e = __builtin_fma(a, b, -p);
+#elif defined(__x86_64__) && !defined(SPFXD_NO_RUNTIME_FMA)
+	double e;
+	if (likely(__cpu_features & 8 /* CPU_FMA */)) {
+		e = p;
+		/* e = a * b - e, one rounding */
+		__asm__ ("vfmsub231sd %2, %1, %0" : "+x"(e) : "x"(a), "x"(b));
+	} else {
+		e = two_prod_err_split(a, b, p);
+	}
+#else
+	double e = two_prod_err_split(a, b, p);
 #endif
 	return (dd_t){ p, e };
 }
@@ -200,6 +217,14 @@ static always_inline dd_t dd_from(double a)
 static always_inline dd_t dd_c(const double *c)
 {
 	return (dd_t){ c[0], c[1] };
+}
+
+/* Nearest integer to z (|z| < 2^31), ties away from zero, independent of
+ * the rounding mode and without a branch on the sign (arguments of the
+ * reduction steps are random in sign, so a branch would mispredict). */
+static always_inline int iround(double z)
+{
+	return (int)(z + __builtin_copysign(0.5, z));
 }
 
 /* Exact 2^k for normal-range k. */
@@ -281,12 +306,55 @@ extern hidden const long double __pio2l_split[4], __pio2l_dd[2], __pil_dd[2], __
 extern hidden const long double __log2el[2], __log2_10l[2], __ln2l[2], __log10_2l[2];
 extern hidden const long double __exp2l_tab[130];
 
-/* Horner evaluation of c[0] + c[1] x + ... + c[n] x^n. */
-static always_inline double poly(const double *c, int n, double x)
+/* c[0] + c[1] x + ... + c[n] x^n.
+ *
+ * With a constant degree the polynomial is evaluated by Estrin's scheme:
+ * pairs (c[i] + c[i+1] x) combined with x^2, x^4, x^8, x^16, so the
+ * dependency chain is about log2(n) multiply-adds long instead of n
+ * (Horner).  The rounding error is of the same order as Horner's for the
+ * small arguments every caller uses.  A variable degree falls back to
+ * Horner's rule. */
+static always_inline double poly_e3(const double *c, int n, double x, double x2)
+{
+	switch (n) {
+	case 0: return c[0];
+	case 1: return c[0] + c[1] * x;
+	case 2: return (c[0] + c[1] * x) + x2 * c[2];
+	default: return (c[0] + c[1] * x) + x2 * (c[2] + c[3] * x);
+	}
+}
+
+static always_inline double poly_e7(const double *c, int n, double x, double x2, double x4)
+{
+	if (n <= 3) return poly_e3(c, n, x, x2);
+	return poly_e3(c, 3, x, x2) + x4 * poly_e3(c + 4, n - 4, x, x2);
+}
+
+static always_inline double poly_e15(const double *c, int n, double x, double x2, double x4, double x8)
+{
+	if (n <= 7) return poly_e7(c, n, x, x2, x4);
+	return poly_e7(c, 7, x, x2, x4) + x8 * poly_e7(c + 8, n - 8, x, x2, x4);
+}
+
+static always_inline double poly_e31(const double *c, int n, double x, double x2, double x4, double x8,
+	double x16)
+{
+	if (n <= 15) return poly_e15(c, n, x, x2, x4, x8);
+	return poly_e15(c, 15, x, x2, x4, x8) + x16 * poly_e15(c + 16, n - 16, x, x2, x4, x8);
+}
+
+static always_inline double poly_horner(const double *c, int n, double x)
 {
 	double r = c[n];
 	for (int i = n - 1; i >= 0; i--) r = r * x + c[i];
 	return r;
+}
+
+static always_inline double poly(const double *c, int n, double x)
+{
+	if (!__builtin_constant_p(n) || n > 31) return poly_horner(c, n, x);
+	double x2 = x * x, x4 = x2 * x2, x8 = x4 * x4, x16 = x8 * x8;
+	return poly_e31(c, n, x, x2, x4, x8, x16);
 }
 
 #endif

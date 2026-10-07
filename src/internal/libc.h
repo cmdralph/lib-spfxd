@@ -75,6 +75,8 @@ hidden void __init_libc(char **envp, char *progname);
 hidden void __init_tls(size_t *aux);
 hidden void *__copy_tls(unsigned char *mem);
 hidden void __init_ssp(void *entropy);
+hidden void __init_cpu(void);
+extern hidden unsigned __cpu_features;
 hidden void __funcs_on_exit(void);
 hidden void __funcs_on_quick_exit(void);
 hidden void __libc_exit_fini(void);

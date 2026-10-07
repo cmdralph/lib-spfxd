@@ -39,6 +39,12 @@ for mode in $MODES; do
 		(cd "$OUT/$mode" && timeout "$TIMEOUT" "$bin" >"$bin.log" 2>&1); st=$?
 		[ $st != 0 ] && tail -20 "$bin.log"
 		record "$mode/unit/$n" $st
+		case $n in memstr_fuzz|string)
+			# again on the baseline (SSE2) code paths
+			(cd "$OUT/$mode" && LIBSPFXD_CPU=baseline timeout "$TIMEOUT" "$bin" >"$bin.base.log" 2>&1); st=$?
+			[ $st != 0 ] && tail -20 "$bin.base.log"
+			record "$mode/unit/$n (baseline cpu)" $st ;;
+		esac
 	done
 	for src in oracle/*.c; do
 		n=$(basename "$src" .c)

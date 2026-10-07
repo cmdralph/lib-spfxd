@@ -37,6 +37,7 @@ hidden void __init_libc(char **envp, char *pn)
 {
 	size_t i, *auxv, aux[AUX_CNT];
 
+	__init_cpu();
 	for (i = 0; i < AUX_CNT; i++) aux[i] = 0;
 	__environ = envp;
 	for (i = 0; envp[i]; i++);
@@ -57,8 +58,13 @@ hidden void __init_libc(char **envp, char *pn)
 	__init_tls(aux);
 	__init_ssp((void *)aux[AT_RANDOM]);
 
-	if (aux[AT_UID] == aux[AT_EUID] && aux[AT_GID] == aux[AT_EGID] && !aux[AT_SECURE])
+	if (aux[AT_UID] == aux[AT_EUID] && aux[AT_GID] == aux[AT_EGID] && !aux[AT_SECURE]) {
+		/* LIBSPFXD_CPU=baseline: ignore optional CPU features (testing
+		 * and diagnosis; not honoured for privileged programs) */
+		const char *cpu = getenv("LIBSPFXD_CPU");
+		if (cpu && !strcmp(cpu, "baseline")) __cpu_features = 0;
 		return;
+	}
 
 	/* Privileged (setuid/setgid) start: never let the standard descriptors
 	 * be closed, or a later open() could become stdout/stderr. */
