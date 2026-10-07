@@ -109,7 +109,7 @@ double log1p(double x)
 {
 	uint64_t u = asuint64(x);
 	uint32_t top = (uint32_t)(u >> 52) & 0x7ff;
-	if (unlikely(!(x > -1.0))) {
+	if (unlikely(!__builtin_isgreater(x, -1.0))) {
 		if (x == -1.0) return __math_divzero(1);
 		return __builtin_isnan(x) ? x + x : __math_invalid(x);
 	}

@@ -20,10 +20,13 @@ double cbrt(double x)
 	uint64_t sign = u & (1ULL << 63);
 	double a = fabs(x);
 	if (!(u << 1) || EXP_BITS(x) == 0x7ff) return x + x;
-	int scale = 0;
+	double scale = 1.0;
 	if (EXP_BITS(x) == 0) {                 /* subnormal: scale by 2^54 */
 		a *= 0x1p54;
-		scale = -18;
+		scale = 0x1p-18;
+	} else if (EXP_BITS(x) > 0x3ff + 600) { /* y^3 would overflow */
+		a *= 0x1p-999;
+		scale = 0x1p333;
 	}
 	/* estimate: divide the biased exponent field (with mantissa) by 3 */
 	int64_t ua = (int64_t)asuint64(a) - (1023LL << 52);
@@ -34,7 +37,7 @@ double cbrt(double x)
 	dd_t d = dd_add_d(y3, -a);
 	double corr = (d.hi + d.lo) / (3.0 * y * y);
 	double r = y - corr;
-	if (scale) r *= 0x1p-18;
+	r *= scale;
 	return asdouble(asuint64(r) | sign);
 }
 

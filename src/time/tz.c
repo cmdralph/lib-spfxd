@@ -439,9 +439,12 @@ static void tz_update(void)
 		set_utc(&zone);
 	} else if (*tz == ':') {
 		if (load_file(tz, &zone)) set_utc(&zone);
-	} else if (!strchr(tz, '/') && !parse_posix(tz, &zone.rule)) {
+	} else if (!load_file(tz, &zone)) {
+		/* a zoneinfo name ("Europe/Berlin", or "EST5EDT" with its
+		 * historical data) takes precedence over the POSIX reading */
+	} else if (!parse_posix(tz, &zone.rule)) {
 		zone.has_rule = 1;
-	} else if (load_file(tz, &zone)) {
+	} else {
 		set_utc(&zone);
 	}
 	publish_globals();
@@ -461,7 +464,8 @@ static void lookup(int64_t t, long *off, int *dst, const char **abbr)
 	if (zone.timecnt) {
 		int64_t first = be_time(zone.trans, zone.tsize);
 		int64_t last = be_time(zone.trans + (size_t)(zone.timecnt - 1) * zone.tsize, zone.tsize);
-		if (t >= first && !(t >= last && zone.has_rule)) {
+		if (t < first) goto type0;
+		if (!(t >= last && zone.has_rule)) {
 			uint32_t lo = 0, hi = zone.timecnt;
 			while (hi - lo > 1) {
 				uint32_t mid = lo + (hi - lo) / 2;
@@ -482,7 +486,9 @@ static void lookup(int64_t t, long *off, int *dst, const char **abbr)
 		*abbr = d ? zone.rule.dst : zone.rule.std;
 		return;
 	}
+type0:
 	/* before the first transition: time type 0 (RFC 8536) */
+	;
 	const unsigned char *ty = zone.types;
 	*off = (int32_t)be32(ty);
 	*dst = ty[4];

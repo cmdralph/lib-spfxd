@@ -55,6 +55,7 @@ double pow(double x, double y)
 	}
 	if (unlikely(fabs(y) >= 0x1p64)) {
 		/* |log x| >= 2^-53 for x != 1, so |y log x| >= 2^11 */
+		if (x == 1.0) return 1.0;               /* (-1)^(huge even) */
 		if ((x > 1.0) == (y > 0)) return __math_oflow((uint32_t)sign);
 		return __math_uflow((uint32_t)sign);
 	}
@@ -63,6 +64,12 @@ double pow(double x, double y)
 	if (y == 2.0) return __math_range(x * x);
 	if (y == -1.0 && x != 0) return __math_range(sign ? -1.0 / x : 1.0 / x);
 	if (y == 0.5 && !sign) return __builtin_sqrt(x);
+	/* x a normal power of two and y integral: the result 2^(k y) is exact
+	 * whenever it is representable, so no inexact or spurious underflow */
+	if (yk && !(asuint64(x) << 12) && EXP_BITS(x) && fabs(y) < 0x1p20) {
+		double r = scalbn(1.0, (EXP_BITS(x) - 0x3ff) * (int)y);
+		return sign ? -r : r;
+	}
 
 	dd_t l = __log_dd(x);
 	dd_t t = two_prod(y, l.hi);

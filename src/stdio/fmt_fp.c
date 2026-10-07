@@ -323,10 +323,9 @@ static long fmt_a(FILE *f, uint64_t m, int e, int is_zero, int neg, char sign,
 			if (p == 0 || kept >> (4 * p)) {
 				kept = 0;
 				lead++;
-				if (lead == 2 && !(fl & FL_LDBL)) {
-					lead = 1;
-					e++;
-				} else if (lead == 16) {
+				/* a carry into the leading digit of a double is kept
+				 * as 0x2p+e (as glibc prints it) */
+				if (lead == 16) {
 					lead = 1;
 					e += 4;
 				}

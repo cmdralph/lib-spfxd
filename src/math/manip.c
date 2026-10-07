@@ -49,6 +49,7 @@ double frexp(double x, int *e)
  * products are exact, and only the last multiplication can round. */
 double scalbn(double x, int n)
 {
+	double x0 = x;
 	if (n > 1023) {
 		x *= 0x1p1023;
 		n -= 1023;
@@ -67,8 +68,8 @@ double scalbn(double x, int n)
 		}
 	}
 	double y = x * pow2i(n);
-	if (__builtin_isinf(y) && !__builtin_isinf(x)) errno = ERANGE;
-	else if (y == 0 && x != 0) errno = ERANGE;
+	if (__builtin_isinf(y) && !__builtin_isinf(x0)) errno = ERANGE;
+	else if (y == 0 && x0 != 0) errno = ERANGE;
 	return y;
 }
 
@@ -108,7 +109,7 @@ int ilogb(double x)
 double logb(double x)
 {
 	if (!__builtin_isfinite(x)) return x * x;
-	if (x == 0) return __math_divzero(1);
+	if (x == 0) return fp_barrier(-1.0) / 0.0;   /* pole: divbyzero only */
 	return (double)ilogb(x);
 }
 
@@ -155,7 +156,7 @@ double nextafter(double x, double y)
 		errno = ERANGE;
 	} else if (!e) {
 		fp_force_eval(x * x + r * r);   /* underflow + inexact */
-		errno = ERANGE;
+		if (ax) errno = ERANGE;         /* stepping off zero is no error */
 	}
 	return r;
 }
@@ -318,7 +319,7 @@ int ilogbf(float x)
 float logbf(float x)
 {
 	if (!__builtin_isfinite(x)) return x * x;
-	if (x == 0) return __math_divzerof(1);
+	if (x == 0) return fp_barrierf(-1.0f) / 0.0f;
 	return (float)ilogbf(x);
 }
 
@@ -365,7 +366,7 @@ float nextafterf(float x, float y)
 		errno = ERANGE;
 	} else if (!e) {
 		fp_force_evalf(x * x + r * r);
-		errno = ERANGE;
+		if (ax) errno = ERANGE;
 	}
 	return r;
 }

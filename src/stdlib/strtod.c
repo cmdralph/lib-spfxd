@@ -274,18 +274,29 @@ static void round_big(const struct big *N, long s, int sticky, const struct fmt 
 		r->inexact = sticky;
 		if (sticky && should_round_up(mode, neg, (int)(m & 1), 0, 1)) {
 			r->m++;
+			if (!r->m) {                 /* 64-bit significand wrapped */
+				r->m = 1ULL << 63;
+				r->e++;
+			}
 		}
 	} else {
 		m = keep > 0 ? big_extract(N, cut, (int)keep) : 0;
 		int half = big_bit(N, cut - 1);
 		int below = big_any_below(N, cut - 1) || sticky;
 		r->inexact = half || below;
-		if (should_round_up(mode, neg, (int)(m & 1), half, below)) m++;
-		r->m = m;
 		r->e = (int)(s + cut);
+		if (should_round_up(mode, neg, (int)(m & 1), half, below)) {
+			m++;
+			if (!m) {                     /* 64-bit significand wrapped */
+				m = 1ULL << 63;
+				r->e++;
+			}
+		}
+		r->m = m;
 	}
-	/* carry out of the significand */
-	if (r->m >> f->P) {
+	/* carry out of the significand (P < 64; a 64-bit carry is handled
+	 * above, and shifting a uint64_t by 64 would be undefined) */
+	if (f->P < 64 && (r->m >> f->P)) {
 		r->m >>= 1;
 		r->e++;
 	}
@@ -479,11 +490,11 @@ static long double decimal_to_fp(const char *digits, int ndig, long e10, int sti
 /* hexadecimal conversion                                                  */
 /* ---------------------------------------------------------------------- */
 
-static long double hex_to_fp(uint64_t m, long e2, int sticky, int prec, int neg)
+static long double hex_to_fp(unsigned __int128 m, long e2, int sticky, int prec, int neg)
 {
 	const struct fmt *f = &formats[prec];
-	uint32_t limbs[3] = { (uint32_t)m, (uint32_t)(m >> 32), 0 };
-	struct big N = { limbs, 2, 3 };
+	uint32_t limbs[5] = { (uint32_t)m, (uint32_t)(m >> 32), (uint32_t)(m >> 64), (uint32_t)(m >> 96), 0 };
+	struct big N = { limbs, 4, 5 };
 	struct conv c;
 	big_norm(&N);
 	if (!N.n) return neg ? -0.0L : 0.0L;
@@ -560,7 +571,7 @@ hidden long double __strtold_internal(const char *restrict s0, char **restrict e
 	    (hexval((unsigned char)s[2]) >= 0 || (s[2] == '.' && hexval((unsigned char)s[3]) >= 0))) {
 		/* hexadecimal significand */
 		const char *p = s + 2;
-		uint64_t m = 0;
+		unsigned __int128 m = 0;   /* room for 64 significant bits plus guard bits */
 		long e2 = 0;
 		int sticky = 0, seen_point = 0, any = 0;
 		for (;; p++) {
@@ -571,12 +582,12 @@ hidden long double __strtold_internal(const char *restrict s0, char **restrict e
 			}
 			if ((v = hexval((unsigned char)*p)) < 0) break;
 			any = 1;
-			if (m >> 60) {
+			if (m >> 120) {
 				/* significand full: keep the digit only as sticky */
 				sticky |= v != 0;
 				if (!seen_point) e2 += 4;
 			} else {
-				m = m << 4 | (uint64_t)v;
+				m = m << 4 | (unsigned)v;
 				if (seen_point) e2 -= 4;
 			}
 		}

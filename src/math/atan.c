@@ -122,7 +122,7 @@ double atan2(double y, double x)
 double asin(double x)
 {
 	double a = fabs(x);
-	if (!(a <= 1.0)) return __builtin_isnan(x) ? x + x : __math_invalid(x);
+	if (!__builtin_islessequal(a, 1.0)) return __builtin_isnan(x) ? x + x : __math_invalid(x);
 	uint32_t top = TOP12(x) & 0x7ff;
 	if (top < 0x3e4) {
 		if (top < 0x010) fp_force_eval(x * x);
@@ -153,7 +153,7 @@ double asin(double x)
 double acos(double x)
 {
 	double a = fabs(x);
-	if (!(a <= 1.0)) return __builtin_isnan(x) ? x + x : __math_invalid(x);
+	if (!__builtin_islessequal(a, 1.0)) return __builtin_isnan(x) ? x + x : __math_invalid(x);
 	if (x == 1.0) return 0.0;
 	if (x == -1.0) return __pi_dd[0] + fp_barrier(__pi_dd[1]);
 	if (a < 0x1p-57) return __pio2_dd[0] + fp_barrier(__pio2_dd[1]);

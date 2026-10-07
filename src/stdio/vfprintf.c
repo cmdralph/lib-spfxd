@@ -536,7 +536,9 @@ static int format(FILE *f, const char *s, va_list *ap, const union arg *pos_args
 			w = 0;
 			break;
 		case '%':
-			w = emit_field(f, &sp, "", 0, 0, "%", 1);
+			/* flags and width on %% are undefined; like glibc, ignore them */
+			out(f, "%", 1);
+			w = 1;
 			break;
 		default: /* floating point */
 			w = __fmt_fp(f, arg.f, sp.width, sp.prec,

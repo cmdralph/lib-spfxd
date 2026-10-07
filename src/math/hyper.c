@@ -117,7 +117,7 @@ double asinh(double x)
 
 double acosh(double x)
 {
-	if (!(x >= 1.0)) return __builtin_isnan(x) ? x + x : __math_invalid(x);
+	if (!__builtin_isgreaterequal(x, 1.0)) return __builtin_isnan(x) ? x + x : __math_invalid(x);
 	if (x == 1.0) return 0.0;
 	if (__builtin_isinf(x)) return x;
 	if (x > 0x1p28) {
@@ -136,7 +136,7 @@ double acosh(double x)
 double atanh(double x)
 {
 	double a = fabs(x);
-	if (!(a < 1.0)) {
+	if (!__builtin_isless(a, 1.0)) {
 		if (a == 1.0) return __math_divzero(__builtin_signbit(x) ? 1 : 0);
 		return __builtin_isnan(x) ? x + x : __math_invalid(x);
 	}

@@ -208,6 +208,7 @@ static long double pow2l(int n)       /* exact 2^n, -16382 <= n <= 16383 */
 
 long double scalbnl(long double x, int n)
 {
+	long double x0 = x;
 	if (n > 16383) {
 		x *= 0x1p16383L;
 		n -= 16383;
@@ -226,8 +227,8 @@ long double scalbnl(long double x, int n)
 		}
 	}
 	long double y = x * pow2l(n);
-	if (__builtin_isinf(y) && !__builtin_isinf(x)) errno = ERANGE;
-	else if (y == 0 && x != 0) errno = ERANGE;
+	if (__builtin_isinf(y) && !__builtin_isinf(x0)) errno = ERANGE;
+	else if (y == 0 && x0 != 0) errno = ERANGE;
 	return y;
 }
 
@@ -266,7 +267,7 @@ int ilogbl(long double x)
 long double logbl(long double x)
 {
 	if (!__builtin_isfinite(x)) return x * x;
-	if (x == 0) return __math_divzerol(1);
+	if (x == 0) return fp_barrierl(-1.0L) / 0.0L;
 	return (long double)ilogbl(x);
 }
 
@@ -310,7 +311,7 @@ long double nextafterl(long double x, long double y)
 		errno = ERANGE;
 	} else if (!e) {
 		fp_force_evall(x * x + u.f * u.f);
-		errno = ERANGE;
+		if (x != 0) errno = ERANGE;
 	}
 	return u.f;
 }
@@ -745,7 +746,7 @@ long double atan2l(long double y, long double x)
 long double asinl(long double x)
 {
 	long double a = fabsl(x);
-	if (!(a <= 1.0L)) return __builtin_isnan(x) ? x + x : __math_invalidl(x);
+	if (!__builtin_islessequal(a, 1.0L)) return __builtin_isnan(x) ? x + x : __math_invalidl(x);
 	if (a < 0x1p-32L) return x;
 	return x_fpatan(x, x_fsqrt((1.0L - x) * (1.0L + x)));
 }
@@ -753,7 +754,7 @@ long double asinl(long double x)
 long double acosl(long double x)
 {
 	long double a = fabsl(x);
-	if (!(a <= 1.0L)) return __builtin_isnan(x) ? x + x : __math_invalidl(x);
+	if (!__builtin_islessequal(a, 1.0L)) return __builtin_isnan(x) ? x + x : __math_invalidl(x);
 	return x_fpatan(x_fsqrt((1.0L - x) * (1.0L + x)), x);
 }
 
@@ -821,7 +822,7 @@ long double asinhl(long double x)
 
 long double acoshl(long double x)
 {
-	if (!(x >= 1.0L)) return __builtin_isnan(x) ? x + x : __math_invalidl(x);
+	if (!__builtin_isgreaterequal(x, 1.0L)) return __builtin_isnan(x) ? x + x : __math_invalidl(x);
 	if (__builtin_isinf(x)) return x;
 	if (x > 0x1p33L) return logl(x) + __ln2l[0];
 	if (x >= 2.0L) return logl(2.0L * x - 1.0L / (x + x_fsqrt(x * x - 1.0L)));
@@ -832,7 +833,7 @@ long double acoshl(long double x)
 long double atanhl(long double x)
 {
 	long double a = fabsl(x);
-	if (!(a < 1.0L)) {
+	if (!__builtin_isless(a, 1.0L)) {
 		if (a == 1.0L) return __math_divzerol(__builtin_signbit(x) ? 1 : 0);
 		return __builtin_isnan(x) ? x + x : __math_invalidl(x);
 	}
