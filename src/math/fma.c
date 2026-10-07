@@ -1,8 +1,9 @@
 /*
  * lib-spfxd — fused multiply-add: fmaf, fma, fmal.
  *
- * The baseline x86-64 ISA has no FMA instruction, so x*y + z is computed
- * exactly in integer arithmetic: the product of the significands is exact
+ * On CPUs with FMA3 the instruction computes fma and fmaf.  Otherwise
+ * (and for results that may need errno) x*y + z is computed exactly in
+ * integer arithmetic: the product of the significands is exact
  * in 128 bits, the addend is aligned against it in a 256-bit accumulator
  * (bits shifted beyond the accumulator collapse into a sticky bit), and the
  * exact sum is rounded once to the target precision in the current
@@ -187,6 +188,16 @@ static const struct fmt F32 = { 24, -126, 127 }, F64 = { 53, -1022, 1023 }, F80 
 
 double fma(double x, double y, double z)
 {
+#ifdef __x86_64__
+	/* hardware FMA when present: correctly rounded in every mode, with
+	 * the IEEE flags; results that may need errno (infinite, NaN, zero,
+	 * tiny) take the software path below, which reports them */
+	if (likely(__cpu_features & 8 /* CPU_FMA */)) {
+		double r = z;
+		__asm__ ("vfmadd231sd %2, %1, %0" : "+x"(r) : "x"(x), "x"(y));
+		if (likely(__builtin_fabs(r) >= DBL_MIN && __builtin_fabs(r) <= DBL_MAX)) return r;
+	}
+#endif
 	if (!__builtin_isfinite(x) || !__builtin_isfinite(y) || !__builtin_isfinite(z) || x == 0 || y == 0)
 		return x * y + z;
 	uint64_t ux = asuint64(x), uy = asuint64(y), uz = asuint64(z);
@@ -201,6 +212,13 @@ double fma(double x, double y, double z)
 
 float fmaf(float x, float y, float z)
 {
+#ifdef __x86_64__
+	if (likely(__cpu_features & 8 /* CPU_FMA */)) {
+		float r = z;
+		__asm__ ("vfmadd231ss %2, %1, %0" : "+x"(r) : "x"(x), "x"(y));
+		if (likely(__builtin_fabsf(r) >= FLT_MIN && __builtin_fabsf(r) <= FLT_MAX)) return r;
+	}
+#endif
 	if (!__builtin_isfinite(x) || !__builtin_isfinite(y) || !__builtin_isfinite(z) || x == 0 || y == 0)
 		return x * y + z;
 	uint32_t ux = asuint(x), uy = asuint(y), uz = asuint(z);
