@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <math.h>
 #include <stdint.h>
+#include <fenv.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include "t.h"
@@ -12,6 +13,20 @@
 static int icmp(const void *a, const void *b)
 {
 	int x = *(const int *)a, y = *(const int *)b;
+	return (x > y) - (x < y);
+}
+
+static unsigned elem_key(const unsigned char *e, size_t w)
+{
+	return w == 1 ? e[0] : (unsigned)e[0] * 256 + e[1];
+}
+
+static size_t cur_w;    /* element size of the array being sorted */
+
+static int keycmp_r(const void *a, const void *b, void *arg)
+{
+	++*(int *)arg;          /* proves the argument is passed through */
+	unsigned x = elem_key(a, cur_w), y = elem_key(b, cur_w);
 	return (x > y) - (x < y);
 }
 
@@ -57,6 +72,18 @@ int main(void)
 	lldiv_t lq = lldiv(LLONG_MIN + 1, -1);
 	CHECK(lq.quot == LLONG_MAX && lq.rem == 0, "lldiv");
 	CHECK(abs(-5) == 5 && labs(-5L) == 5 && llabs(-5LL) == 5 && imaxabs(-5) == 5, "abs");
+	/* strtod in directed rounding modes: the sign must be part of the
+	 * rounded value (-0.1 rounds down to the double below -0.1) */
+	{
+		fesetround(FE_DOWNWARD);
+		double dn = strtod("-0.1", 0), up_ = -strtod("0.1", 0);
+		fesetround(FE_TONEAREST);
+		CHECK(dn < up_ && nextafter(dn, 0) == up_, "strtod(-0.1) rounds down in FE_DOWNWARD");
+		fesetround(FE_UPWARD);
+		double u = strtod("-123456789012345678e-3", 0);
+		fesetround(FE_TONEAREST);
+		CHECK(u >= -123456789012345.678 - 0.02 && u <= -123456789012345.678 + 0.02, "strtod long significand, upward");
+	}
 	/* qsort / bsearch */
 	int n = 10000, *a = malloc(n * sizeof *a);
 	srand(1);
@@ -73,6 +100,30 @@ int main(void)
 	qsort(a, (size_t)n, sizeof *a, icmp);
 	for (int i = 1; i < n; i++) if (a[i - 1] > a[i]) sorted = 0;
 	CHECK(sorted, "qsort adversarial");
+	/* element sizes 1..24 (the key is the first byte pair), lengths on both
+	 * sides of the stack-buffer threshold, plus qsort_r's argument */
+	{
+		static const size_t ws[] = { 1, 2, 3, 4, 5, 8, 12, 16, 24 };
+		int fuzz_ok = 1;
+		for (size_t wi = 0; wi < sizeof ws / sizeof *ws; wi++) {
+			size_t w = ws[wi];
+			for (size_t len = 0; len < 3000; len = len < 40 ? len + 1 : len * 2 + 7) {
+				unsigned char *v = malloc(len * w + 1);
+				unsigned long sum = 0, sum2 = 0;
+				for (size_t i = 0; i < len * w; i++) v[i] = (unsigned char)(rand() % (w == 1 ? 256 : 7));
+				for (size_t i = 0; i < len; i++) sum += elem_key(v + i * w, w);
+				int arg = 0;
+				cur_w = w;
+				qsort_r(v, len, w, keycmp_r, &arg);
+				for (size_t i = 0; i < len; i++) sum2 += elem_key(v + i * w, w);
+				for (size_t i = 1; i < len; i++)
+					if (elem_key(v + (i - 1) * w, w) > elem_key(v + i * w, w)) fuzz_ok = 0;
+				if (sum != sum2 || (len > 1 && arg == 0)) fuzz_ok = 0;
+				free(v);
+			}
+		}
+		CHECK(fuzz_ok, "qsort_r element sizes 1..24, lengths 0..3000");
+	}
 	int key = 4321;
 	for (int i = 0; i < n; i++) a[i] = 2 * i;
 	CHECK(bsearch(&key, a, (size_t)n, sizeof *a, icmp) == NULL, "bsearch miss");

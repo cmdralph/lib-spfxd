@@ -1,7 +1,14 @@
 /*
- * lib-spfxd — qsort / qsort_r: introsort.
+ * lib-spfxd — qsort / qsort_r.
  *
- * Quicksort with median-of-three (Tukey's ninther for large partitions)
+ * With a comparison function call per comparison, the number of
+ * comparisons decides the speed, so the primary algorithm is a top-down
+ * merge sort (about n log2 n - n comparisons, the fewest of the practical
+ * sorts) into a temporary buffer: on the stack for small arrays,
+ * otherwise from malloc.  If that allocation fails, the array is sorted in
+ * place by the introsort below, so qsort never fails.
+ *
+ * Introsort: quicksort with median-of-three (Tukey's ninther for large partitions)
  * pivots and a Hoare-style partition that stops on keys equal to the pivot,
  * so runs of equal keys split evenly instead of degrading.  Recursion goes
  * into the smaller side only (O(log n) stack).  If the recursion depth
@@ -20,6 +27,7 @@ struct ctx {
 	size_t w;
 	cmp_fn cmp;
 	void *arg;
+	int (*cmp2)(const void *, const void *);    /* qsort's comparator, called directly */
 	int kind;   /* 0 generic, 4: uint32 elements, 8: uint64 elements */
 };
 
@@ -50,7 +58,7 @@ static __inline void swap(char *a, char *b, const struct ctx *c)
 }
 
 #define AT(i) (base + (i) * c->w)
-#define CMP(a, b) c->cmp((a), (b), c->arg)
+#define CMP(a, b) (c->cmp2 ? c->cmp2((a), (b)) : c->cmp((a), (b), c->arg))
 
 static void insertion_sort(char *base, size_t n, const struct ctx *c)
 {
@@ -134,24 +142,84 @@ static void introsort(char *base, size_t n, const struct ctx *c, int depth)
 	insertion_sort(base, n, c);
 }
 
-void qsort_r(void *base, size_t n, size_t w, cmp_fn cmp, void *arg)
+/* Sort b[0..n) using t (room for n elements).  After merging the two
+ * sorted halves into t, the unmerged tail of the right half is already in
+ * its final place, so only the merged prefix is copied back.  The merge
+ * loop is specialized per element kind so the copy is one move. */
+#define MERGE_LOOP(T, LESSEQ)                                                \
+	while (x < b2 && y < end) {                                         \
+		if (LESSEQ) { *(T *)p = *(const T *)x; x += sizeof(T); }    \
+		else { *(T *)p = *(const T *)y; y += sizeof(T); }           \
+		p += sizeof(T);                                             \
+	}
+#define MERGE_ANY(LESSEQ)                                                   \
+	if (kind == 4) { MERGE_LOOP(uint32_t, LESSEQ) }                     \
+	else if (kind == 8) { MERGE_LOOP(uint64_t, LESSEQ) }                \
+	else {                                                              \
+		while (x < b2 && y < end) {                                 \
+			if (LESSEQ) { memcpy(p, x, w); x += w; }            \
+			else { memcpy(p, y, w); y += w; }                   \
+			p += w;                                             \
+		}                                                           \
+	}
+
+static void merge_sort(char *b, size_t n, const struct ctx *c, char *t)
 {
-	struct ctx c = { w, cmp, arg, 0 };
-	if (n < 2 || !w) return;
-	if (w == 8 && !((uintptr_t)base & 7)) c.kind = 8;
-	else if (w == 4 && !((uintptr_t)base & 3)) c.kind = 4;
-	int depth = 2 * (64 - __builtin_clzl(n));
-	introsort(base, n, &c, depth);
+	size_t w = c->w;
+	if (n < 2) return;
+	size_t n1 = n / 2;
+	char *b2 = b + n1 * w, *end = b + n * w;
+	merge_sort(b, n1, c, t);
+	merge_sort(b2, n - n1, c, t);
+	/* the comparator and element kind in locals: a call through them
+	 * could otherwise force a reload of *c on every iteration */
+	int (*f2)(const void *, const void *) = c->cmp2;
+	cmp_fn f3 = c->cmp;
+	void *arg = c->arg;
+	int kind = c->kind;
+	char *x = b, *y = b2, *p = t;
+	if (f2) {
+		MERGE_ANY(f2(x, y) <= 0)
+	} else {
+		MERGE_ANY(f3(x, y, arg) <= 0)
+	}
+	if (x < b2) {
+		memcpy(p, x, (size_t)(b2 - x));
+		p += b2 - x;
+	}
+	memcpy(b, t, (size_t)(p - t));
 }
 
-static int call_plain(const void *a, const void *b, void *f)
+static void sort(void *base, size_t n, struct ctx *c)
 {
-	return ((int (*)(const void *, const void *))f)(a, b);
+	size_t w = c->w;
+	if (w == 8 && !((uintptr_t)base & 7)) c->kind = 8;
+	else if (w == 4 && !((uintptr_t)base & 3)) c->kind = 4;
+	if (n <= SIZE_MAX / w) {
+		size_t bytes = n * w;
+		char stack_buf[1024] __attribute__((__aligned__(16)));
+		char *t = bytes <= sizeof stack_buf ? stack_buf : malloc(bytes);
+		if (t) {
+			merge_sort(base, n, c, t);
+			if (t != stack_buf) free(t);
+			return;
+		}
+	}
+	introsort(base, n, c, 2 * (64 - __builtin_clzl(n)));
+}
+
+void qsort_r(void *base, size_t n, size_t w, cmp_fn cmp, void *arg)
+{
+	struct ctx c = { w, cmp, arg, 0, 0 };
+	if (n < 2 || !w) return;
+	sort(base, n, &c);
 }
 
 void qsort(void *base, size_t n, size_t w, int (*cmp)(const void *, const void *))
 {
-	qsort_r(base, n, w, call_plain, (void *)cmp);
+	struct ctx c = { w, 0, 0, cmp, 0 };
+	if (n < 2 || !w) return;
+	sort(base, n, &c);
 }
 
 void *bsearch(const void *key, const void *base, size_t n, size_t w,

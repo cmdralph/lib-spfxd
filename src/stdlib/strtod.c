@@ -372,6 +372,56 @@ static const double pow10_dbl[23] = {
 };
 
 /*
+ * Eisel-Lemire (D. Lemire, "Number Parsing at a Gigabyte per Second",
+ * 2021), for double results in round-to-nearest: D * 10^q is computed as
+ * D * 5^q * 2^q with a 128-bit truncated 5^q (src/stdlib/pow5_table.c).
+ * The product's top bits give the significand; when its low bits show
+ * that the truncation could matter (the true value might straddle a
+ * rounding boundary) the function declines and the exact path runs.
+ * Returns 1 with a correctly rounded *out, or 0.  Only normal results are
+ * produced here; subnormal and overflowing ones take the exact path,
+ * which also reports ERANGE.
+ */
+extern hidden const uint64_t __pow5_128[];
+
+static int eisel_lemire(uint64_t w, long q, double *out)
+{
+	if (q < -342 || q > 308) return 0;
+	int lz = __builtin_clzll(w);
+	w <<= lz;
+	const uint64_t *t = __pow5_128 + 2 * (q + 342);
+	unsigned __int128 p = (unsigned __int128)w * t[0];
+	uint64_t hi = (uint64_t)(p >> 64), lo = (uint64_t)p;
+	if ((hi & 0x1ff) == 0x1ff) {
+		/* the next 64 bits of 5^q could carry into the result */
+		unsigned __int128 p2 = (unsigned __int128)w * t[1];
+		uint64_t hi2 = (uint64_t)(p2 >> 64);
+		lo += hi2;
+		if (lo < hi2) hi++;
+	}
+	/* still all ones below the result bits: possibly off by one */
+	if (lo == ~0ULL && (q < -27 || q > 55)) return 0;
+	int upper = (int)(hi >> 63);
+	uint64_t m = hi >> (upper + 9);
+	/* binary exponent: floor(q log2(10)) + 63 - lz + upper, biased */
+	long e2 = (((152170L + 65536L) * q) >> 16) + 63 + upper - lz + 1023;
+	if (e2 <= 0) return 0;                       /* subnormal: exact path */
+	/* exact halfway case between two doubles: round to even */
+	if (lo <= 1 && q >= -4 && q <= 23 && (m & 3) == 1 && (m << (upper + 9)) == hi)
+		m &= ~1ULL;
+	m += m & 1;
+	m >>= 1;
+	if (m >= (2ULL << 52)) {
+		m = 1ULL << 52;
+		e2++;
+	}
+	if (e2 >= 0x7ff) return 0;                   /* overflow: exact path */
+	uint64_t bits = ((uint64_t)e2 << 52) | (m & ((1ULL << 52) - 1));
+	memcpy(out, &bits, sizeof *out);
+	return 1;
+}
+
+/*
  * digits: first significant digit; ndig significant digits are taken from
  * the string (skipping one '.'), value = D * 10^e10, sticky = discarded
  * nonzero digits.
@@ -391,21 +441,24 @@ static long double decimal_to_fp(const char *digits, int ndig, long e10, int sti
 			D = D * 10 + (uint64_t)(*p - '0');
 			i++;
 		}
+		/* the sign goes on the exact operand, so the one rounding is
+		 * of the signed value (directed rounding modes) */
 		if (prec == 1 && D < (1ULL << 53) && e10 >= -22 && e10 <= 22) {
-			double v = (double)D;
-			v = e10 < 0 ? v / pow10_dbl[-e10] : v * pow10_dbl[e10];
-			return neg ? -v : v;
+			double v = neg ? -(double)D : (double)D;
+			return e10 < 0 ? v / pow10_dbl[-e10] : v * pow10_dbl[e10];
 		}
 		if (prec == 0 && D < (1ULL << 24) && e10 >= -10 && e10 <= 10) {
-			float v = (float)D;
-			v = e10 < 0 ? v / (float)pow10_dbl[-e10] : v * (float)pow10_dbl[e10];
-			return neg ? -v : v;
+			float v = neg ? -(float)D : (float)D;
+			return e10 < 0 ? v / (float)pow10_dbl[-e10] : v * (float)pow10_dbl[e10];
 		}
 		if (prec == 2 && e10 >= -27 && e10 <= 27) {
-			long double v = (long double)D, p10 = 1;
+			long double v = neg ? -(long double)D : (long double)D, p10 = 1;
 			for (long i = 0, k = e10 < 0 ? -e10 : e10; i < k; i++) p10 *= 10;
-			v = e10 < 0 ? v / p10 : v * p10;
-			return neg ? -v : v;
+			return e10 < 0 ? v / p10 : v * p10;
+		}
+		if (prec == 1 && mode == 0 && D) {
+			double v;
+			if (eisel_lemire(D, e10, &v)) return neg ? -v : v;   /* to nearest: symmetric */
 		}
 	}
 
