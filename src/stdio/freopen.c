@@ -22,7 +22,7 @@ FILE *freopen(const char *restrict path, const char *restrict mode, FILE *restri
 		if (__syscall_ret((unsigned long)__syscall(SYS_fcntl, f->fd, F_SETFL, flags)) < 0)
 			goto fail;
 	} else {
-		int fd = (int)__sysret_cp(SYS_open, path, flags, 0666);
+		int fd = (int)__sysret_cp(SYS_openat, AT_FDCWD, path, flags, 0666);
 		if (fd < 0) goto fail;
 		if (fd != f->fd) {
 			long r = __syscall(SYS_dup3, fd, f->fd, flags & O_CLOEXEC);

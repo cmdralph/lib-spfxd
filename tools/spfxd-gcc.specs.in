@@ -22,7 +22,7 @@ libgcc.a%s %:if-exists(libgcc_eh.a%s)
 %{static:crtend.o%s;shared|static-pie|!no-pie:crtendS.o%s;:crtend.o%s} @LIB@/crtn.o
 
 *link:
--m elf_x86_64 %{!r:--build-id} %{!static|static-pie:--eh-frame-hdr} -nostdlib %{!shared:%{!static:%{!static-pie:-dynamic-linker @LIB@/libc.so}}} %{shared:-shared} %{static:-static} %{static-pie:-static -pie --no-dynamic-linker -z text} %{rdynamic:-export-dynamic} %{!r:--gc-sections} --hash-style=both
+-m @EMUL@ %{!r:--build-id} %{!static|static-pie:--eh-frame-hdr} -nostdlib %{!shared:%{!static:%{!static-pie:-dynamic-linker @LIB@/libc.so}}} %{shared:-shared} %{static:-static} %{static-pie:-static -pie --no-dynamic-linker -z text} %{rdynamic:-export-dynamic} %{!r:--gc-sections} --hash-style=both
 
 *esp_link:
 

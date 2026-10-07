@@ -49,5 +49,6 @@ int sigqueue(pid_t pid, int sig, union sigval value)
 
 int pause(void)
 {
-	return (int)__sysret_cp(SYS_pause);
+	/* ppoll with no descriptors and no timeout sleeps until a signal */
+	return (int)__sysret_cp(SYS_ppoll, 0, 0, 0, 0, _NSIG / 8);
 }

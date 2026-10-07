@@ -33,6 +33,25 @@ static __inline __attribute__((__noreturn__)) void __arch_crash(void)
 	for (;;) __asm__ __volatile__ ("hlt" ::: "memory");
 }
 
+/* Current SSE rounding mode as 0 nearest, 1 down, 2 up, 3 toward zero. */
+static __inline int __arch_round_mode(void)
+{
+	unsigned csr;
+	__asm__ __volatile__ ("stmxcsr %0" : "=m"(csr));
+	return (int)((csr >> 13) & 3);
+}
+
+/* Enter a program's entry point with the given initial stack pointer and
+ * no finalizer (rdx = 0), as the kernel would. */
+static __inline __attribute__((__noreturn__)) void __arch_jump_to_entry(unsigned long entry, void *sp)
+{
+	__asm__ __volatile__ ("mov %1,%%rsp\n\txor %%edx,%%edx\n\tjmp *%0" :: "r"(entry), "r"(sp) : "memory");
+	__builtin_unreachable();
+}
+
+/* Saved program counter in a signal handler's ucontext_t (cancellation). */
+#define UC_PC(uc) ((uc)->uc_mcontext.gregs[REG_RIP])
+
 #define ARCH_PAGE_SIZE 4096UL
 #define ARCH_CACHE_LINE 64
 

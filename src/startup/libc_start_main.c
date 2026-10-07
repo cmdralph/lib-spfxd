@@ -16,6 +16,8 @@
 #include <elf.h>
 #include <poll.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include "libc.h"
@@ -69,10 +71,11 @@ hidden void __init_libc(char **envp, char *pn)
 	/* Privileged (setuid/setgid) start: never let the standard descriptors
 	 * be closed, or a later open() could become stdout/stderr. */
 	struct pollfd pfd[3] = { { .fd = 0 }, { .fd = 1 }, { .fd = 2 } };
-	if (__syscall(SYS_poll, pfd, 3, 0) < 0) a_crash();
+	struct timespec zero = { 0, 0 };
+	if (__syscall(SYS_ppoll, pfd, 3, &zero, 0, _NSIG / 8) < 0) a_crash();
 	for (i = 0; i < 3; i++)
 		if ((pfd[i].revents & POLLNVAL) &&
-		    __syscall(SYS_open, "/dev/null", O_RDWR) < 0)
+		    __syscall(SYS_openat, AT_FDCWD, "/dev/null", O_RDWR) < 0)
 			a_crash();
 	__libc.secure = 1;
 }

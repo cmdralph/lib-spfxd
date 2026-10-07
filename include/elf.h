@@ -1,4 +1,4 @@
-/* lib-spfxd — <elf.h>: ELF file format definitions (System V gABI + x86-64 psABI). */
+/* lib-spfxd — <elf.h>: ELF file format definitions (System V gABI, x86-64 psABI, AArch64 ELF ABI). */
 #ifndef _ELF_H
 #define _ELF_H
 #include <stdint.h>
@@ -367,5 +367,24 @@ typedef struct { uint64_t a_type; union { uint64_t a_val; } a_un; } Elf64_auxv_t
 #define R_X86_64_TLSDESC 36
 #define R_X86_64_IRELATIVE 37
 #define R_X86_64_RELATIVE64 38
+
+/* AArch64 (ELF for the Arm 64-bit Architecture): data and dynamic
+ * relocations */
+#define R_AARCH64_NONE 0
+#define R_AARCH64_ABS64 257
+#define R_AARCH64_ABS32 258
+#define R_AARCH64_ABS16 259
+#define R_AARCH64_PREL64 260
+#define R_AARCH64_PREL32 261
+#define R_AARCH64_PREL16 262
+#define R_AARCH64_COPY 1024
+#define R_AARCH64_GLOB_DAT 1025
+#define R_AARCH64_JUMP_SLOT 1026
+#define R_AARCH64_RELATIVE 1027
+#define R_AARCH64_TLS_DTPMOD64 1028
+#define R_AARCH64_TLS_DTPREL64 1029
+#define R_AARCH64_TLS_TPREL64 1030
+#define R_AARCH64_TLSDESC 1031
+#define R_AARCH64_IRELATIVE 1032
 
 #endif

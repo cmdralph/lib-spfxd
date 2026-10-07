@@ -28,16 +28,38 @@ static unsigned char builtin_tls[sizeof(struct pthread) + BUILTIN_TLS_EXTRA]
 
 extern const size_t _DYNAMIC[] __attribute__((__weak__, __visibility__("hidden")));
 
+/*
+ * Lay out one thread's TLS area in mem[0 .. __libc.tls_size):
+ *
+ *   variant II (x86-64):  [dtv] ... [TLS blocks][struct pthread]
+ *                                               ^ thread pointer
+ *   variant I (AArch64):  [dtv] ... [struct pthread][TCB gap][TLS blocks]
+ *                                                   ^ thread pointer
+ *
+ * and fill the blocks from the modules' initialization images.  A module's
+ * `offset` is its distance below (variant II) or above (variant I) the
+ * thread pointer; the thread pointer is aligned to __libc.tls_align.
+ */
 hidden void *__copy_tls(unsigned char *mem)
 {
 	uintptr_t *dtv = (uintptr_t *)mem;
-	uintptr_t top = (uintptr_t)mem + __libc.tls_size - sizeof(struct pthread);
-	top &= -(uintptr_t)__libc.tls_align;
-	struct pthread *td = (struct pthread *)top;
+#if TLS_ABOVE_TP
+	uintptr_t tp = (uintptr_t)mem + (__libc.tls_cnt + 1) * sizeof(void *) + sizeof(struct pthread);
+	tp = (tp + __libc.tls_align - 1) & -(uintptr_t)__libc.tls_align;
+	struct pthread *td = (struct pthread *)tp - 1;
+#else
+	uintptr_t tp = (uintptr_t)mem + __libc.tls_size - sizeof(struct pthread);
+	tp &= -(uintptr_t)__libc.tls_align;
+	struct pthread *td = (struct pthread *)tp;
+#endif
 	size_t i = 1;
 
 	for (struct tls_module *p = __libc.tls_head; p; p = p->next, i++) {
-		unsigned char *blk = (unsigned char *)top - p->offset;
+#if TLS_ABOVE_TP
+		unsigned char *blk = (unsigned char *)tp + p->offset;
+#else
+		unsigned char *blk = (unsigned char *)tp - p->offset;
+#endif
 		dtv[i] = (uintptr_t)blk;
 		memcpy(blk, p->image, p->len);
 		memset(blk + p->len, 0, p->size - p->len);
@@ -110,13 +132,24 @@ hidden void __init_tls(size_t *aux)
 		main_tls.len = tls_ph->p_filesz;
 		main_tls.size = tls_ph->p_memsz;
 		main_tls.align = tls_ph->p_align ? tls_ph->p_align : 1;
+#if TLS_ABOVE_TP
+		/* first block after the TCB gap, congruent to the image modulo
+		 * its alignment (the linker's TP-relative offsets assume it) */
+		main_tls.offset = TLS_TCB_SIZE +
+			(((uintptr_t)main_tls.image - TLS_TCB_SIZE) & (main_tls.align - 1));
+#else
 		main_tls.offset = main_tls.size +
 			((-(uintptr_t)main_tls.image - main_tls.size) & (main_tls.align - 1));
+#endif
 		if (main_tls.align > __libc.tls_align) __libc.tls_align = main_tls.align;
 		__libc.tls_head = &main_tls;
 		__libc.tls_cnt = 1;
 	}
+#if TLS_ABOVE_TP
+	__tls_layout_finish(main_tls.offset + main_tls.size);
+#else
 	__tls_layout_finish(main_tls.offset);
+#endif
 
 	if (__libc.tls_size <= sizeof builtin_tls) {
 		mem = builtin_tls;

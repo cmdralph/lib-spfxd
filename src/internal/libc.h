@@ -35,7 +35,7 @@ struct tls_module {
 	size_t len;            /* bytes of image to copy */
 	size_t size;           /* total size including .tbss */
 	size_t align;
-	size_t offset;         /* distance below the thread pointer (variant II) */
+	size_t offset;         /* distance below (variant II) or above (variant I) the thread pointer */
 };
 
 struct libc_state {

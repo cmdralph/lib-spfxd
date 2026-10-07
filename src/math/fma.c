@@ -1,7 +1,8 @@
 /*
  * lib-spfxd — fused multiply-add: fmaf, fma, fmal.
  *
- * On CPUs with FMA3 the instruction computes fma and fmaf.  Otherwise
+ * On x86-64 CPUs with FMA3, and always on AArch64, the instruction
+ * computes fma and fmaf.  Otherwise
  * (and for results that may need errno) x*y + z is computed exactly in
  * integer arithmetic: the product of the significands is exact
  * in 128 bits, the addend is aligned against it in a 256-bit accumulator
@@ -197,6 +198,12 @@ double fma(double x, double y, double z)
 		__asm__ ("vfmadd231sd %2, %1, %0" : "+x"(r) : "x"(x), "x"(y));
 		if (likely(__builtin_fabs(r) >= DBL_MIN && __builtin_fabs(r) <= DBL_MAX)) return r;
 	}
+#elif defined(__aarch64__)
+	{
+		double r;
+		__asm__ ("fmadd %d0, %d1, %d2, %d3" : "=w"(r) : "w"(x), "w"(y), "w"(z));
+		if (likely(__builtin_fabs(r) >= DBL_MIN && __builtin_fabs(r) <= DBL_MAX)) return r;
+	}
 #endif
 	if (!__builtin_isfinite(x) || !__builtin_isfinite(y) || !__builtin_isfinite(z) || x == 0 || y == 0)
 		return x * y + z;
@@ -216,6 +223,12 @@ float fmaf(float x, float y, float z)
 	if (likely(__cpu_features & 8 /* CPU_FMA */)) {
 		float r = z;
 		__asm__ ("vfmadd231ss %2, %1, %0" : "+x"(r) : "x"(x), "x"(y));
+		if (likely(__builtin_fabsf(r) >= FLT_MIN && __builtin_fabsf(r) <= FLT_MAX)) return r;
+	}
+#elif defined(__aarch64__)
+	{
+		float r;
+		__asm__ ("fmadd %s0, %s1, %s2, %s3" : "=w"(r) : "w"(x), "w"(y), "w"(z));
 		if (likely(__builtin_fabsf(r) >= FLT_MIN && __builtin_fabsf(r) <= FLT_MAX)) return r;
 	}
 #endif

@@ -78,9 +78,19 @@ int main(void)
 		printf("%Lg %.20Le %.25Lf %La %.0Lf\n", lvals[v], lvals[v], lvals[v] < 1e30L ? lvals[v] : 0.0L, lvals[v],
 		       lvals[v] < 1e30L ? lvals[v] : 0.0L);
 	for (int i = 0; i < 500; i++) {
+		/* random finite long doubles over the whole exponent range, every
+		 * bit of the representation set explicitly */
+#if LDBL_MANT_DIG == 64
 		union { long double l; struct { unsigned long long m; unsigned short e; } p; } x;
+		memset(&x, 0, sizeof x);
 		x.p.m = rnd() | (1ULL << 63);
 		x.p.e = (unsigned short)(rnd() % 0x7ffe);
+#else
+		union { long double l; struct { unsigned long long lo, hi; } p; } x;
+		x.p.lo = rnd();
+		unsigned long long ex = rnd() % 0x7ffe;
+		x.p.hi = (ex << 48) | (rnd() & 0xffffffffffffULL);
+#endif
 		printf("%.21Lg %.5Le\n", x.l, x.l);
 	}
 	/* snprintf truncation and return values */

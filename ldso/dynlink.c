@@ -24,10 +24,10 @@
  * TLS: modules present at startup get static TLS (variant II, below the
  * thread pointer).  Modules loaded by dlopen get dynamic TLS: a block is
  * allocated for a thread on its first __tls_get_addr for that module.
- * Such modules may not use the initial-exec model (R_X86_64_TPOFF64).
+ * Such modules may not use the initial-exec model (REL_TPOFF).
  *
  * dlclose never unmaps: objects stay loaded until exit (their destructors
- * run at exit).  TLS descriptors (R_X86_64_TLSDESC) are not supported.
+ * run at exit).  TLS descriptors (REL_TLSDESC) are not supported.
  */
 #include <dlfcn.h>
 #include <elf.h>
@@ -43,6 +43,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "libc.h"
+#include "reloc.h"
 #include "pthread_impl.h"
 #include "syscall.h"
 
@@ -325,12 +326,12 @@ static int do_relocs(struct dso *dso, const Elf64_Rela *rel, size_t size)
 		uint32_t si = (uint32_t)ELF64_R_SYM(rel->r_info);
 		size_t *where = (size_t *)(base + rel->r_offset);
 		size_t addend = (size_t)rel->r_addend;
-		if (type == R_X86_64_NONE) continue;
-		if (type == R_X86_64_RELATIVE) {
+		if (type == REL_NONE) continue;
+		if (type == REL_RELATIVE) {
 			*where = (size_t)base + addend;
 			continue;
 		}
-		if (type == R_X86_64_IRELATIVE) {
+		if (type == REL_IRELATIVE) {
 			*where = ((size_t (*)(void))(base + addend))();
 			continue;
 		}
@@ -342,7 +343,7 @@ static int do_relocs(struct dso *dso, const Elf64_Rela *rel, size_t size)
 				def = (struct symdef){ sym, dso };
 			} else {
 				def = find_sym(name, dso->closure, dso->nclosure,
-				               type == R_X86_64_COPY ? dso : 0);
+				               type == REL_COPY ? dso : 0);
 				if (!def.sym && ELF64_ST_BIND(sym->st_info) != STB_WEAK) {
 					error("%s: symbol not found: %s", dso->name, name);
 					return -1;
@@ -354,28 +355,30 @@ static int do_relocs(struct dso *dso, const Elf64_Rela *rel, size_t size)
 		size_t sv = 0;
 		if (def.sym) {
 			sv = (size_t)def.dso->base + def.sym->st_value;
-			if (ELF64_ST_TYPE(def.sym->st_info) == STT_GNU_IFUNC && type != R_X86_64_COPY)
+			if (ELF64_ST_TYPE(def.sym->st_info) == STT_GNU_IFUNC && type != REL_COPY)
 				sv = ((size_t (*)(void))sv)();
 		}
 		switch (type) {
-		case R_X86_64_64:
+		case REL_SYMBOLIC:
 			*where = sv + addend;
 			break;
-		case R_X86_64_GLOB_DAT:
-		case R_X86_64_JUMP_SLOT:
+		case REL_GOT:
+		case REL_PLT:
 			*where = sv;
 			break;
-		case R_X86_64_PC32:
+#ifdef REL_PC32
+		case REL_PC32:
 			*(uint32_t *)where = (uint32_t)(sv + addend - (size_t)where);
 			break;
-		case R_X86_64_32:
-		case R_X86_64_32S:
+		case REL_32:
+		case REL_32S:
 			*(uint32_t *)where = (uint32_t)(sv + addend);
 			break;
-		case R_X86_64_SIZE64:
+		case REL_SIZE64:
 			*where = (def.sym ? def.sym->st_size : 0) + addend;
 			break;
-		case R_X86_64_COPY:
+#endif
+		case REL_COPY:
 			if (def.sym) {
 				memcpy(where, (void *)sv, sym->st_size);
 				struct moved *nm = realloc(moved, (nmoved + 1) * sizeof *nm);
@@ -385,19 +388,23 @@ static int do_relocs(struct dso *dso, const Elf64_Rela *rel, size_t size)
 				}
 			}
 			break;
-		case R_X86_64_DTPMOD64:
+		case REL_DTPMOD:
 			*where = def.dso ? def.dso->tls_id : 0;
 			break;
-		case R_X86_64_DTPOFF64:
+		case REL_DTPOFF:
 			*where = (def.sym ? def.sym->st_value : 0) + addend;
 			break;
-		case R_X86_64_TPOFF64:
+		case REL_TPOFF:
 			if (def.dso && def.dso->dyn_tls) {
 				error("%s: cannot use the initial-exec TLS model in a dynamically loaded library",
 				      dso->name);
 				return -1;
 			}
+#if TLS_ABOVE_TP
+			*where = (def.sym ? def.sym->st_value : 0) + addend + (def.dso ? def.dso->tls.offset : 0);
+#else
 			*where = (def.sym ? def.sym->st_value : 0) + addend - (def.dso ? def.dso->tls.offset : 0);
+#endif
 			break;
 		default:
 			error("%s: unsupported relocation type %u", dso->name, type);
@@ -463,7 +470,7 @@ static void redirect_moved(struct dso *p)
 		const Elf64_Rela *r = (const void *)(p->base + off);
 		for (size_t i = 0; i < sz / sizeof *r; i++, r++) {
 			uint32_t type = (uint32_t)ELF64_R_TYPE(r->r_info);
-			if (type != R_X86_64_GLOB_DAT && type != R_X86_64_64) continue;
+			if (type != REL_GOT && type != REL_SYMBOLIC) continue;
 			size_t *where = (size_t *)(p->base + r->r_offset);
 			for (size_t k = 0; k < nmoved; k++)
 				if (*where - moved[k].from < moved[k].size || *where == moved[k].from)
@@ -864,11 +871,20 @@ static int tls_register(struct dso *p, int dynamic)
 	tls_mods[id] = &p->tls;
 	p->tls_id = id;
 	if (!dynamic) {
+#if TLS_ABOVE_TP
+		/* static: place after the previous module (the first after the
+		 * TCB gap), congruent to the image modulo its alignment */
+		size_t o = tls_static_offset ? tls_static_offset : TLS_TCB_SIZE;
+		o += ((uintptr_t)p->tls.image - o) & (p->tls.align - 1);
+		p->tls.offset = o;
+		tls_static_offset = o + p->tls.size;
+#else
 		/* static: place below the previous module (see tls_init.c) */
 		size_t o = tls_static_offset + p->tls.size;
 		o += (-(uintptr_t)p->tls.image - o) & (p->tls.align - 1);
 		p->tls.offset = o;
 		tls_static_offset = o;
+#endif
 		if (p->tls.align > __libc.tls_align) __libc.tls_align = p->tls.align;
 		p->tls.next = 0;
 		struct tls_module **pp = &__libc.tls_head;
@@ -1041,11 +1057,7 @@ static void load_sys_path(void)
 
 static _Noreturn void jump_to_entry(size_t entry, size_t *sp)
 {
-	__asm__ __volatile__(
-		"mov %1,%%rsp\n\t"
-		"xor %%edx,%%edx\n\t"
-		"jmp *%0"
-		:: "r"(entry), "r"(sp) : "memory");
+	__arch_jump_to_entry(entry, sp);
 	for (;;);
 }
 

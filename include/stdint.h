@@ -77,8 +77,8 @@ typedef uint64_t uint_fast64_t;
 #define SIZE_MAX    UINT64_MAX
 #define SIG_ATOMIC_MIN INT32_MIN
 #define SIG_ATOMIC_MAX INT32_MAX
-#define WCHAR_MIN   (-1-0x7fffffff)
-#define WCHAR_MAX   (0x7fffffff)
+#define WCHAR_MIN   __WCHAR_MIN__
+#define WCHAR_MAX   __WCHAR_MAX__
 #define WINT_MIN    0U
 #define WINT_MAX    UINT32_MAX
 

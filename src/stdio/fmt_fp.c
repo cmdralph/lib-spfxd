@@ -48,15 +48,34 @@ static void mul_small(struct dec *x, uint32_t f)
 	}
 }
 
-static void build(struct dec *x, uint64_t m, int e)
+typedef unsigned __int128 u128;
+
+static int ctz128(u128 m)
 {
-	int tz = __builtin_ctzll(m);
+	uint64_t lo = (uint64_t)m;
+	return lo ? __builtin_ctzll(lo) : 64 + __builtin_ctzll((uint64_t)(m >> 64));
+}
+
+static int clz128(u128 m)
+{
+	uint64_t hi = (uint64_t)(m >> 64);
+	return hi ? __builtin_clzll(hi) : 64 + __builtin_clzll((uint64_t)m);
+}
+
+static void build(struct dec *x, u128 m, int e)
+{
+	int tz = ctz128(m);
 	m >>= tz;
 	e += tz;
 	x->n = 0;
-	while (m) {
+	while (m >> 64) {                          /* binary128 significands */
 		x->l[x->n++] = (uint32_t)(m % LIMB);
 		m /= LIMB;
+	}
+	uint64_t m64 = (uint64_t)m;
+	while (m64) {
+		x->l[x->n++] = (uint32_t)(m64 % LIMB);
+		m64 /= LIMB;
 	}
 	if (e >= 0) {
 		x->frac = 0;
@@ -105,9 +124,7 @@ static int sticky_after(const struct dec *x, int k)
 
 static int rounding_mode(void)
 {
-	unsigned csr;
-	__asm__ __volatile__ ("stmxcsr %0" : "=m"(csr));
-	return (int)((csr >> 13) & 3);             /* 0 near, 1 down, 2 up, 3 zero */
+	return __arch_round_mode();     /* 0 nearest, 1 down, 2 up, 3 zero */
 }
 
 /*
@@ -265,14 +282,17 @@ static long fmt_g(FILE *f, const struct dec *x, int neg, char sign, int w, int p
 	return fmt_e(f, x, neg, sign, w, (fl & FL_ALT) ? P - 1 : S - 1, fl, upper);
 }
 
-/* %a: hexadecimal significand.  Doubles print as 0x1.hhhh (glibc style);
- * long doubles show the x87 explicit integer bit: 0x8.hhhh, 0xf.hhhh. */
-static long fmt_a(FILE *f, uint64_t m, int e, int is_zero, int neg, char sign,
+/* %a: hexadecimal significand.  Doubles print as 0x1.hhhh (glibc style).
+ * x87 long doubles show the explicit integer bit: 0x8.hhhh, 0xf.hhhh;
+ * binary128 long doubles print as 0x1.hhhh with 28 fraction digits.
+ * m and e describe the value as m * 2^e (see __fmt_fp); frac below holds
+ * the fraction bits left-aligned in 128 bits. */
+static long fmt_a(FILE *f, u128 m, int e, int is_zero, int neg, char sign,
 	int w, int p, unsigned fl, int upper)
 {
 	const char *hex = upper ? "0123456789ABCDEF" : "0123456789abcdef";
 	int lead;
-	uint64_t frac;
+	u128 frac;
 	int fbits;
 
 	if (is_zero) {
@@ -280,40 +300,40 @@ static long fmt_a(FILE *f, uint64_t m, int e, int is_zero, int neg, char sign,
 		frac = 0;
 		fbits = 52;
 		e = 0;
-	} else if (fl & FL_LDBL) {
+	} else if ((fl & FL_LDBL) && LDBL_MANT_DIG == 64) {
+		/* 64-bit significand with explicit integer bit: first hex digit
+		 * holds its top four bits */
 		lead = (int)(m >> 60);
-		frac = m << 4;
+		frac = m << 68;
 		fbits = 60;
 		e = e + 63 - 3;
 	} else {
-		/* m holds the 64-bit x87 significand of an exactly converted
-		 * double; renormalize to 1.fraction (or 0.fraction for doubles
-		 * that were subnormal). */
-		int E = e + 63;                     /* value = m/2^63 * 2^E */
-		if (E < -1022) {
-			int sh = -1022 - E;
-			frac = sh < 64 ? m >> sh : 0;
-			E = -1022;
-		} else {
-			frac = m;
+		/* renormalize to 1.fraction, or 0.fraction below the format's
+		 * normal range (DBL_MIN for doubles, LDBL_MIN for binary128) */
+		int t = 127 - clz128(m);            /* index of the leading one */
+		int E = e + t;
+		int emin = (fl & FL_LDBL) ? LDBL_MIN_EXP - 1 : DBL_MIN_EXP - 1;
+		frac = m << (127 - t);
+		if (E < emin) {
+			int sh = emin - E;
+			frac = sh < 128 ? frac >> sh : 0;
+			E = emin;
 		}
-		lead = (int)(frac >> 63);
+		lead = (int)(frac >> 127);
 		frac <<= 1;
-		fbits = 52;
-		frac >>= 12;                        /* 52 fraction bits, right aligned */
-		frac <<= 12;
+		fbits = (fl & FL_LDBL) ? LDBL_MANT_DIG - 1 : DBL_MANT_DIG - 1;
 		e = E;
 	}
-	/* frac: fraction bits left-aligned in 64 bits; fbits meaningful */
+	/* frac: fraction bits left-aligned in 128 bits; fbits meaningful */
 	int ndig = (fbits + 3) / 4;
 	if (p >= 0 && p < ndig) {
-		int drop = 64 - 4 * p;                  /* bits below the kept digits */
-		uint64_t kept = p ? frac >> drop : 0;
-		uint64_t rem = drop >= 64 ? frac : frac << (64 - drop) >> (64 - drop);
-		uint64_t half = 1ULL << (drop - 1);
+		int drop = 128 - 4 * p;                 /* bits below the kept digits */
+		u128 kept = p ? frac >> drop : 0;
+		u128 rem = drop >= 128 ? frac : frac << (128 - drop) >> (128 - drop);
+		u128 half = (u128)1 << (drop - 1);
 		int up;
 		switch (rounding_mode()) {
-		case 0: up = rem > half || (rem == half && ((p ? kept : (uint64_t)lead) & 1)); break;
+		case 0: up = rem > half || (rem == half && ((p ? kept : (u128)lead) & 1)); break;
 		case 1: up = neg && rem; break;
 		case 2: up = !neg && rem; break;
 		default: up = 0; break;
@@ -334,7 +354,7 @@ static long fmt_a(FILE *f, uint64_t m, int e, int is_zero, int neg, char sign,
 		frac = p ? kept << drop : 0;
 		ndig = p;
 	} else if (p < 0) {
-		while (ndig > 0 && !((frac >> (64 - 4 * ndig)) & 15)) ndig--;
+		while (ndig > 0 && !((frac >> (128 - 4 * ndig)) & 15)) ndig--;
 	}
 
 	char body[48];
@@ -344,7 +364,7 @@ static long fmt_a(FILE *f, uint64_t m, int e, int is_zero, int neg, char sign,
 	body[bl++] = hex[lead];
 	int fraction_digits = p > ndig ? p : ndig;
 	if (fraction_digits > 0 || (fl & FL_ALT)) body[bl++] = '.';
-	for (int i = 0; i < ndig; i++) body[bl++] = hex[(frac >> (60 - 4 * i)) & 15];
+	for (int i = 0; i < ndig; i++) body[bl++] = hex[(int)(frac >> (124 - 4 * i)) & 15];
 	long extra_zeros = fraction_digits - ndig;
 
 	char eb[8];
@@ -373,17 +393,36 @@ static long fmt_a(FILE *f, uint64_t m, int e, int is_zero, int neg, char sign,
 
 hidden int __fmt_fp(FILE *f, long double y, int w, int p, unsigned fl, int conv)
 {
+	/* decode: value = m * 2^e, m an integer (64 bits for the x87 format
+	 * with its explicit integer bit, 113 for IEEE binary128) */
+	int neg, bexp, nan;
+	u128 m;
+#if LDBL_MANT_DIG == 64
 	union { long double f; struct { uint64_t m; uint16_t se; } i; } u = { .f = y };
-	int neg = u.i.se >> 15;
-	int bexp = u.i.se & 0x7fff;
-	uint64_t m = u.i.m;
+	neg = u.i.se >> 15;
+	bexp = u.i.se & 0x7fff;
+	m = u.i.m;
+	nan = (u.i.m << 1) != 0;
+	int e = (bexp ? bexp : 1) - 16383 - 63;
+#elif LDBL_MANT_DIG == 113
+	u128 bits;
+	memcpy(&bits, &y, sizeof bits);
+	neg = (int)(bits >> 127);
+	bexp = (int)(bits >> 112) & 0x7fff;
+	m = bits & (((u128)1 << 112) - 1);
+	nan = m != 0;
+	if (bexp) m |= (u128)1 << 112;
+	int e = (bexp ? bexp : 1) - 16383 - 112;
+#else
+#error unsupported long double format
+#endif
 	char sign = neg ? '-' : (fl & FL_PLUS) ? '+' : (fl & FL_SPACE) ? ' ' : 0;
 	int upper = conv >= 'A' && conv <= 'Z';
 	int lc = conv | 32;
 
 	if (bexp == 0x7fff) {
 		/* infinity (significand 0x8000...) or NaN; never zero padded */
-		const char *s = (m << 1) ? (upper ? "NAN" : "nan") : (upper ? "INF" : "inf");
+		const char *s = nan ? (upper ? "NAN" : "nan") : (upper ? "INF" : "inf");
 		long total = 3 + (sign != 0);
 		long width = w > total ? w : total;
 		if (!(fl & FL_LEFT)) repeat(f, ' ', width - total);
@@ -394,8 +433,6 @@ hidden int __fmt_fp(FILE *f, long double y, int w, int p, unsigned fl, int conv)
 	}
 
 	int is_zero = m == 0;
-	/* value = m * 2^(e) with e for the integer significand */
-	int e = (bexp ? bexp : 1) - 16383 - 63;
 
 	if (lc == 'a') return (int)fmt_a(f, m, e, is_zero, neg, sign, w, p, fl, upper);
 

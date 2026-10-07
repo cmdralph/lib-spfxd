@@ -94,14 +94,14 @@ static int child(void *p)
 					CHECK(fl);
 					CHECK(__syscall(SYS_fcntl, f->fd, F_SETFD, fl & ~FD_CLOEXEC));
 				} else {
-					CHECK(__syscall(SYS_dup2, f->srcfd, f->fd));
+					CHECK(__syscall(SYS_dup3, f->srcfd, f->fd, 0));
 				}
 				break;
 			case FA_OPEN:
-				fd = __syscall(SYS_open, f->path, f->oflag, f->mode);
+				fd = __syscall(SYS_openat, AT_FDCWD, f->path, f->oflag, f->mode);
 				CHECK(fd);
 				if (fd != f->fd) {
-					CHECK(__syscall(SYS_dup2, fd, f->fd));
+					CHECK(__syscall(SYS_dup3, fd, f->fd, 0));
 					__syscall(SYS_close, fd);
 				}
 				break;

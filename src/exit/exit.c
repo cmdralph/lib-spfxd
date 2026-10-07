@@ -8,6 +8,7 @@
  * reached through weak aliases of a no-op, so exit() never pulls in stdio
  * or the dynamic linker by itself.
  */
+#include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include "libc.h"
@@ -36,7 +37,7 @@ _Noreturn void exit(int code)
 	int tid = __self()->tid;
 	int owner = a_cas(&exit_owner, 0, tid);
 	if (owner && owner != tid)
-		for (;;) __syscall(SYS_pause);
+		for (;;) __syscall(SYS_ppoll, 0, 0, 0, 0, _NSIG / 8);
 
 	__exit_status = code;
 	__funcs_on_exit();

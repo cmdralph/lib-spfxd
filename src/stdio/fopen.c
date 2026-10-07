@@ -51,7 +51,7 @@ FILE *fopen(const char *restrict path, const char *restrict mode)
 		return 0;
 	}
 	int flags = __fmodeflags(mode);
-	int fd = (int)__sysret_cp(SYS_open, path, flags, 0666);
+	int fd = (int)__sysret_cp(SYS_openat, AT_FDCWD, path, flags, 0666);
 	if (fd < 0) return 0;
 	FILE *f = __fdopen_flags(fd, flags);
 	if (!f) __syscall(SYS_close, fd);

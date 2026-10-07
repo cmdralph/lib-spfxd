@@ -80,7 +80,7 @@ int pthread_setname_np(pthread_t th, const char *name)
 		return (int)-__syscall(SYS_prctl, 15 /* PR_SET_NAME */, name, 0, 0, 0);
 	char path[48];
 	comm_path(th, path, sizeof path);
-	int fd = (int)__syscall(SYS_open, path, O_WRONLY | O_CLOEXEC);
+	int fd = (int)__syscall(SYS_openat, AT_FDCWD, path, O_WRONLY | O_CLOEXEC);
 	if (fd < 0) return -fd;
 	long r = __syscall(SYS_write, fd, name, len);
 	__syscall(SYS_close, fd);
@@ -94,7 +94,7 @@ int pthread_getname_np(pthread_t th, char *name, size_t len)
 		return (int)-__syscall(SYS_prctl, 16 /* PR_GET_NAME */, name, 0, 0, 0);
 	char path[48];
 	comm_path(th, path, sizeof path);
-	int fd = (int)__syscall(SYS_open, path, O_RDONLY | O_CLOEXEC);
+	int fd = (int)__syscall(SYS_openat, AT_FDCWD, path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0) return -fd;
 	long r = __syscall(SYS_read, fd, name, len - 1);
 	__syscall(SYS_close, fd);

@@ -26,8 +26,8 @@
 # endif
 #endif
 
-#define WCHAR_MIN (-1-0x7fffffff)
-#define WCHAR_MAX (0x7fffffff)
+#define WCHAR_MIN __WCHAR_MIN__
+#define WCHAR_MAX __WCHAR_MAX__
 #define WEOF 0xffffffffU
 
 __SPFXD_BEGIN_DECLS

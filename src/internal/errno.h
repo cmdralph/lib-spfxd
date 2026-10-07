@@ -15,7 +15,13 @@
 #define SPFXD_TCB_ERRNO_OFFSET 0x3c
 
 #undef errno
-#if defined(__SEG_FS) && !defined(SPFXD_NO_SEG_FS)
+#if TLS_ABOVE_TP
+/* variant I: struct pthread sits below the thread pointer at a distance
+ * this header cannot see; go through __errno_location (declared const, so
+ * repeated uses fold) */
+int *__errno_location(void) __attribute__((__const__));
+#define errno (*__errno_location())
+#elif defined(__SEG_FS) && !defined(SPFXD_NO_SEG_FS)
 #define errno (*(int __seg_fs *)SPFXD_TCB_ERRNO_OFFSET)
 #else
 #define errno (*(int *)((char *)__arch_tp() + SPFXD_TCB_ERRNO_OFFSET))
