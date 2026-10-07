@@ -83,6 +83,16 @@ if python3 -c "import mpmath" 2>/dev/null; then
 	grep -c ok "$OUT/ulp.log" | sed 's/^/  cases ok: /'
 	[ $st != 0 ] && grep FAIL "$OUT/ulp.log"
 	record "math/ulp" $st
+	# correct rounding of the fast-path functions in all four rounding modes
+	"$CC" -static -O2 -o "$OUT/mdump" math/mdump.c -lm
+	st=0
+	for m in near up down zero; do
+		for f in exp exp2 log log2 log10 pow atan; do
+			"$OUT/mdump" $f 1500 5 $m | python3 math/judge.py $f $m >>"$OUT/judge.log" 2>&1 || st=1
+		done
+	done
+	[ $st != 0 ] && grep "ulp)" "$OUT/judge.log" | head
+	record "math/rounding-modes" $st
 else
 	echo "== libm accuracy: skipped (python3 mpmath not available) =="
 fi

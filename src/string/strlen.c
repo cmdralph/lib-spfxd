@@ -2,7 +2,7 @@
 #include <string.h>
 #include "string_impl.h"
 
-size_t strlen(const char *s)
+size_t (strlen)(const char *s)
 {
 	const char *a = s;
 	for (; !ALIGNED(s); s++)

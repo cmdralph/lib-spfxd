@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <math.h>
 #include "fp.h"
+#include "fastpath.h"
 
 /* 0: not an integer, 1: odd integer, 2: even integer (y finite) */
 static int int_kind(double y)
@@ -71,6 +72,25 @@ double pow(double x, double y)
 		return sign ? -r : r;
 	}
 
+	/* fast path: x normal, result normal (|y log x| <= 708) */
+	if (likely(EXP_BITS(x) != 0)) {
+		double el;
+		dd_t L = log_acc_core(x, &el);
+		dd_t t = two_prod(y, L.hi);
+		double ylo = y * L.lo;
+		t.lo += ylo;
+		if (likely(fabs(t.hi) <= 708.0)) {
+			/* error of t: |y| el, plus two roundings in t.lo */
+			double et = fabs(y) * el + 0x1p-51 * (fabs(t.lo) + fabs(ylo));
+			double hi, lo, a;
+			int sc = exp_fast_core(t.hi, t.lo, &hi, &lo);
+			/* hi < 2: an error et in the exponent is at most 2.01 et
+			 * absolute on the scale of hi */
+			/* the sign goes in before rounding (exact), for directed modes */
+			if (sign) { hi = -hi; lo = -lo; }
+			if (likely(ziv_round(hi, lo, EXP_EPS + 2.01 * et, &a))) return scale_normal(a, sc);
+		}
+	}
 	dd_t l = __log_dd(x);
 	dd_t t = two_prod(y, l.hi);
 	t.lo += y * l.lo;

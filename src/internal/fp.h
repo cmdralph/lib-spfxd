@@ -22,6 +22,25 @@
 #include <float.h>
 #include "libc.h"
 
+/* The library is compiled with -ffreestanding (hence -fno-builtin), which
+ * would turn every fabs/copysign in libm into a function call.  Inside
+ * the library they are bit operations; the files that define the public
+ * functions opt out with SPFXD_DEFINES_FP_PRIMITIVES. */
+#ifndef SPFXD_DEFINES_FP_PRIMITIVES
+#undef fabs
+#undef fabsf
+#undef fabsl
+#undef copysign
+#undef copysignf
+#undef copysignl
+#define fabs(x) __builtin_fabs(x)
+#define fabsf(x) __builtin_fabsf(x)
+#define fabsl(x) __builtin_fabsl(x)
+#define copysign(x, y) __builtin_copysign(x, y)
+#define copysignf(x, y) __builtin_copysignf(x, y)
+#define copysignl(x, y) __builtin_copysignl(x, y)
+#endif
+
 static always_inline uint64_t asuint64(double x)
 {
 	union { double f; uint64_t i; } u = { x };

@@ -13,12 +13,12 @@
 
 /* ---------------------------------------------------------------- double */
 
-double copysign(double x, double y)
+double (copysign)(double x, double y)
 {
 	return asdouble((asuint64(x) & ~(1ULL << 63)) | (asuint64(y) & (1ULL << 63)));
 }
 
-double fabs(double x)
+double (fabs)(double x)
 {
 	return asdouble(asuint64(x) & ~(1ULL << 63));
 }
@@ -244,12 +244,12 @@ int __fpclassify(double x) { return fpclassify(x); }
 
 /* ---------------------------------------------------------------- float */
 
-float copysignf(float x, float y)
+float (copysignf)(float x, float y)
 {
 	return asfloat((asuint(x) & 0x7fffffffu) | (asuint(y) & 0x80000000u));
 }
 
-float fabsf(float x)
+float (fabsf)(float x)
 {
 	return asfloat(asuint(x) & 0x7fffffffu);
 }

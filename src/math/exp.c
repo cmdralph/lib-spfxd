@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <math.h>
 #include "fp.h"
+#include "fastpath.h"
 
 dd_t __exp_dd_kernel(dd_t x, int *scale)
 {
@@ -42,17 +43,29 @@ dd_t __exp_dd_kernel(dd_t x, int *scale)
 double __exp_finish(dd_t e, int k, int sign)
 {
 	if (sign) e = dd_neg(e);
-	if (k > -1022) {
+	/* e is in (0.98, 2): for k = -1022 the result is normal iff |e| >= 1 */
+	if (k > -1022 || (k == -1022 && fabs(e.hi) >= 1.0)) {
 		double y = e.hi + e.lo;
 		if (k > 1023) return __math_check_oflow(y * 2.0 * pow2i(k - 1));
 		return __math_check_oflow(y * pow2i(k));
 	}
-	/* subnormal (or nearly) result: scale both parts exactly into the
-	 * normal range, combine, then apply the final factor with a single
-	 * rounding */
-	double h = e.hi * pow2i(k + 1000), l = e.lo * pow2i(k + 1000);
-	double y = (h + l) * 0x1p-1000;
-	return __math_check_uflow(y);
+	/* subnormal (or nearly) result.  v = e 2^(k+1022) < 1 (scaled
+	 * exactly); 1 + v is rounded once at the granularity 2^-52 of [1, 2),
+	 * which is exactly the subnormal spacing 2^-1074 after the final,
+	 * exact, scaling by 2^-1022.  (Scaling first and adding afterwards
+	 * would round twice.)  The sign is applied before the rounding so
+	 * directed modes round the signed value. */
+	if (k + 1022 < -60) return __math_uflow(sign);
+	double vh = e.hi * pow2i(k + 1022), vl = e.lo * pow2i(k + 1022);
+	double one = sign ? -1.0 : 1.0;
+	double hi = one + vh;
+	double lo = (one - hi) + vh + vl;           /* |one| >= |vh|: exact error */
+	double y = ((hi + lo) - one) * 0x1p-1022;
+	/* tiny and inexact: raise underflow (the steps above are exact or
+	 * normal-range operations, which do not) */
+	fp_force_eval(fp_barrier(0x1p-1022) * 0x1p-1022);
+	errno = ERANGE;
+	return y;
 }
 
 double __exp_dd(dd_t x, int sign)
@@ -66,6 +79,13 @@ double __exp_dd(dd_t x, int sign)
 
 double exp(double x)
 {
+	/* fast path: normal results (|x| <= 708) whose rounding is certain */
+	if (likely((asuint64(x) & 0x7fffffffffffffffULL) - asuint64(0x1p-54) <=
+	           asuint64(708.0) - asuint64(0x1p-54))) {
+		double hi, lo, a;
+		int s = exp_fast_core(x, 0.0, &hi, &lo);
+		if (likely(ziv_round(hi, lo, EXP_EPS, &a))) return scale_normal(a, s);
+	}
 	uint32_t top = TOP12(x) & 0x7ff;
 	if (unlikely(top >= 0x408)) {            /* |x| >= 512, inf or nan */
 		if (__builtin_isnan(x)) return x + x;
@@ -93,6 +113,12 @@ double exp2(double x)
 	if (x == (double)(int)x && x >= -1022 && x <= 1023) return pow2i((int)x);
 	dd_t t = two_prod(x, __ln2[0]);
 	t.lo += x * __ln2[1];
+	if (likely(fabs(x) <= 1021.0)) {
+		/* x ln2 is a dd good to 2^-96 relative: far inside EXP_EPS */
+		double hi, lo, a;
+		int s = exp_fast_core(t.hi, t.lo, &hi, &lo);
+		if (likely(ziv_round(hi, lo, EXP_EPS, &a))) return scale_normal(a, s);
+	}
 	return __exp_dd(fast_two_sum(t.hi, t.lo), 0);
 }
 
@@ -109,6 +135,11 @@ double exp10(double x)
 	}
 	dd_t t = two_prod(x, __ln10[0]);
 	t.lo += x * __ln10[1];
+	if (likely(fabs(x) <= 307.0)) {
+		double hi, lo, a;
+		int s = exp_fast_core(t.hi, t.lo, &hi, &lo);
+		if (likely(ziv_round(hi, lo, EXP_EPS, &a))) return scale_normal(a, s);
+	}
 	return __exp_dd(fast_two_sum(t.hi, t.lo), 0);
 }
 
@@ -127,8 +158,10 @@ double expm1(double x)
 		if (x < -38.0) return fp_barrier(0x1p-1000) - 1.0;   /* -1, inexact */
 	}
 	if (top < 0x3c9) {                       /* |x| < 2^-54 */
-		if (x != 0) fp_force_eval(x * x + 0x1p-1000);
-		return x;
+		/* the true value lies strictly beyond/before x by far less than
+		 * half an ulp: nudge so that directed rounding goes the right way
+		 * (to nearest this is x itself); zero keeps its sign */
+		return x == 0 ? x : x + fabs(x) * 0x1p-60;
 	}
 	double ax = fabs(x);
 	if (ax < 0.0108) {

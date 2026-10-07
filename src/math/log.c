@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <math.h>
 #include "fp.h"
+#include "fastpath.h"
 
 /* log(m) for the normalized significand of x (as dd) and the exponent k. */
 static dd_t log_parts(double x, int *kp)
@@ -78,14 +79,50 @@ static int log_special(double x, double *res)
 double log(double x)
 {
 	double r;
+	uint64_t u = asuint64(x);
+	if (likely(u - 0x0010000000000000ULL < 0x7ff0000000000000ULL - 0x0010000000000000ULL)) {
+		/* fast path for positive normal x:
+		 * log x = k ln2 + mh + ml, k ln2hi exact (42-bit constant) */
+		double mh, ml, r2;
+		int k = log_fast_core(x, &mh, &ml, &r2);
+		double kd = (double)k;
+		dd_t h = two_sum(kd * __log_ln2[0], mh);
+		double lo = h.lo + (kd * __log_ln2[1] + ml);
+		/* two_sum is exact; k ln2lo errs by < 2^-85 */
+		double eps = LOG_ERR(r2) + 0x1p-84;
+		double a;
+		if (likely(ziv_round(h.hi, lo, eps, &a))) return a;
+	}
 	if (log_special(x, &r)) return r;
 	dd_t l = __log_dd(x);
 	return l.hi + l.lo;
 }
 
+/* (mh + ml) * C for a dd constant C, as hi + lo (error < 2^-52 r2 more
+ * than C times that of ml; see fastpath.h). */
+static always_inline dd_t log_scale(double mh, double ml, const double *c)
+{
+	dd_t p = two_prod(mh, c[0]);
+	p.lo += mh * c[1] + ml * c[0];
+	return p;
+}
+
+#define LOGN_ERR(r2) (0x1p-49 * (r2) + 0x1p-78)
+
 double log2(double x)
 {
 	double r;
+	uint64_t u = asuint64(x);
+	if (likely(u - 0x0010000000000000ULL < 0x7ff0000000000000ULL - 0x0010000000000000ULL)) {
+		double mh, ml, r2;
+		int k = log_fast_core(x, &mh, &ml, &r2);
+		dd_t p = log_scale(mh, ml, __inv_ln2);
+		dd_t h = two_sum((double)k, p.hi);
+		double lo = h.lo + p.lo;
+		double eps = LOGN_ERR(r2);
+		double a;
+		if (likely(ziv_round(h.hi, lo, eps, &a))) return a;
+	}
 	if (log_special(x, &r)) return r;
 	int k;
 	dd_t l = log_parts(x, &k);
@@ -97,6 +134,20 @@ double log2(double x)
 double log10(double x)
 {
 	double r;
+	uint64_t u = asuint64(x);
+	if (likely(u - 0x0010000000000000ULL < 0x7ff0000000000000ULL - 0x0010000000000000ULL)) {
+		double mh, ml, r2;
+		int k = log_fast_core(x, &mh, &ml, &r2);
+		dd_t p = log_scale(mh, ml, __inv_ln10);
+		/* k log10(2) as an exact product plus the constant's tail */
+		dd_t t = two_prod((double)k, __log10_2[0]);
+		t.lo += (double)k * __log10_2[1];
+		dd_t h = two_sum(t.hi, p.hi);
+		double lo = h.lo + (t.lo + p.lo);
+		double eps = LOGN_ERR(r2) + 0x1p-100 * fabs(h.hi);
+		double a;
+		if (likely(ziv_round(h.hi, lo, eps, &a))) return a;
+	}
 	if (log_special(x, &r)) return r;
 	int k;
 	dd_t l = log_parts(x, &k);
@@ -115,8 +166,10 @@ double log1p(double x)
 	}
 	if (top >= 0x7ff) return x;             /* +inf */
 	if (top < 0x3c9) {                      /* |x| < 2^-54 */
-		if (x != 0) fp_force_eval(x * x + 0x1p-1000);
-		return x;
+		/* the true value lies strictly beyond/before x by far less than
+		 * half an ulp: nudge so that directed rounding goes the right way
+		 * (to nearest this is x itself); zero keeps its sign */
+		return x == 0 ? x : x - fabs(x) * 0x1p-60;
 	}
 	/* 1 + x = s.hi + s.lo exactly; log(1+x) = log(s.hi) + s.lo / s.hi */
 	dd_t s = two_sum(1.0, x);

@@ -92,6 +92,23 @@ r = ln2 / 64 * mpf("1.02")
 fit(lambda x: (mp.expm1(x) - x - x * x / 2) / x**3 if x != 0 else mpf(1) / 6,
     -r, r, 4, "__expm1_poly", "(expm1(r) - r - r^2/2) / r^3")
 
+# exp fast path: 2^(j/128) as dd, ln2/128 split with a 35-bit high part
+# (k ln2hi exact for |k| < 2^17, i.e. |x| < 709.8) and a minimax fit of
+# (exp(r) - 1 - r) / r^2 for |r| <= ln2/256 (with margin).
+emit("/* fast exp: 2^(j/128), j = 0..127, as double-double (hi, lo) pairs */")
+vals = []
+for j in range(128):
+    h, l = dd(mp.power(2, mpf(j) / 128))
+    vals += [h, l]
+arr("__exp128_tab", vals, per=2)
+l128 = ln2 / 128
+l128_hi = trunc_bits(l128, 35)
+emit("hidden const double __exp128_ln2[2] = { %s, %s };" % (hexd(l128_hi), hexd(l128 - l128_hi)))
+emit("hidden const double __exp128_inv = %s;" % hexd(128 / ln2))
+r = ln2 / 256 * mpf("1.05")
+fit(lambda x: (mp.expm1(x) - x) / x**2 if x != 0 else mpf(1) / 2,
+    -r, r, 4, "__exp128_poly", "(exp(r) - 1 - r) / r^2")
+
 # ---------------------------------------------------------------- log
 # The argument is normalized to m in [0.75, 1.5) by subtracting the bit
 # pattern of 0.75 from the bit pattern of x: the integer exponent comes

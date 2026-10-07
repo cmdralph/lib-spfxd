@@ -162,14 +162,14 @@ static int ld_exp(long double x)
 
 /* ----------------------------------------------------------- manipulation */
 
-long double fabsl(long double x)
+long double (fabsl)(long double x)
 {
 	union ldshape u = { x };
 	u.i.se &= 0x7fff;
 	return u.f;
 }
 
-long double copysignl(long double x, long double y)
+long double (copysignl)(long double x, long double y)
 {
 	union ldshape u = { x }, v = { y };
 	u.i.se = (uint16_t)((u.i.se & 0x7fff) | (v.i.se & 0x8000));
@@ -676,8 +676,10 @@ long double sinl(long double x)
 {
 	if (!__builtin_isfinite(x)) return __builtin_isnan(x) ? x + x : __math_invalidl(x);
 	if (fabsl(x) < 0x1p-32L) {
-		if (x != 0) fp_force_evall(x + 0x1p-16000L);
-		return x;
+		/* the true value lies strictly beyond/before x by far less than
+		 * half an ulp: nudge so that directed rounding goes the right way
+		 * (to nearest this is x itself); zero keeps its sign */
+		return x == 0 ? x : x - x * 0x1p-70L;
 	}
 	ldd_t r;
 	switch (rem_pio2l(x, &r)) {
@@ -721,8 +723,10 @@ long double tanl(long double x)
 {
 	if (!__builtin_isfinite(x)) return __builtin_isnan(x) ? x + x : __math_invalidl(x);
 	if (fabsl(x) < 0x1p-32L) {
-		if (x != 0) fp_force_evall(x + 0x1p-16000L);
-		return x;
+		/* the true value lies strictly beyond/before x by far less than
+		 * half an ulp: nudge so that directed rounding goes the right way
+		 * (to nearest this is x itself); zero keeps its sign */
+		return x == 0 ? x : x + x * 0x1p-70L;
 	}
 	ldd_t r;
 	int n = rem_pio2l(x, &r);

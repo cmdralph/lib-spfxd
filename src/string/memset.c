@@ -3,7 +3,7 @@
 #include <string.h>
 #include "string_impl.h"
 
-void *memset(void *dest, int c, size_t n)
+void *(memset)(void *dest, int c, size_t n)
 {
 	unsigned char *d = dest;
 	size_t w = ONES * (unsigned char)c;

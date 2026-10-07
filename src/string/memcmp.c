@@ -3,7 +3,7 @@
 #include <string.h>
 #include "string_impl.h"
 
-int memcmp(const void *vl, const void *vr, size_t n)
+int (memcmp)(const void *vl, const void *vr, size_t n)
 {
 	const unsigned char *l = vl, *r = vr;
 	for (; n >= WSIZE; n -= WSIZE, l += WSIZE, r += WSIZE) {

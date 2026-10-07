@@ -10,20 +10,22 @@
 #include <math.h>
 #include "fp.h"
 
-dd_t __sin_dd(dd_t r)
+/* Inlinable kernels; the hidden __sin_dd etc. below wrap them for the
+ * other files that need them (gamma, sinpi, complex). */
+static always_inline dd_t sin_dd(dd_t r)
 {
 	double z = r.hi * r.hi;
 	double t = r.hi * z * poly(__sin_poly, 6, z) + r.lo * (1.0 - 0.5 * z);
 	return fast_two_sum(r.hi, t);
 }
 
-double __sin_kernel(dd_t r)
+static always_inline double sin_k(dd_t r)
 {
 	double z = r.hi * r.hi;
 	return r.hi + (r.hi * z * poly(__sin_poly, 6, z) + r.lo * (1.0 - 0.5 * z));
 }
 
-dd_t __cos_dd(dd_t r)
+static always_inline dd_t cos_dd(dd_t r)
 {
 	dd_t z = two_prod(r.hi, r.hi);
 	double hz = 0.5 * z.hi;
@@ -33,10 +35,33 @@ dd_t __cos_dd(dd_t r)
 	return fast_two_sum(w, lo);
 }
 
-double __cos_kernel(dd_t r)
+static always_inline double cos_k(dd_t r)
 {
-	dd_t c = __cos_dd(r);
+	dd_t c = cos_dd(r);
 	return c.hi + c.lo;
+}
+
+dd_t __sin_dd(dd_t r) { return sin_dd(r); }
+double __sin_kernel(dd_t r) { return sin_k(r); }
+dd_t __cos_dd(dd_t r) { return cos_dd(r); }
+double __cos_kernel(dd_t r) { return cos_k(r); }
+
+/* x mod pi/2 with the medium-range reduction of rem_pio2.c inlined (the
+ * common case); huge arguments still go through __rem_pio2. */
+static always_inline int reduce(double x, dd_t *r)
+{
+	if (likely(fabs(x) < 0x1.921fb54442d18p20)) {
+		double z = x * __two_over_pi;
+		int n = iround(z);
+		double nd = (double)n;
+		double y1 = x - nd * __pio2_split[0];
+		dd_t a = two_sum(y1, -nd * __pio2_split[1]);
+		dd_t s = two_sum(a.hi, -nd * __pio2_split[2]);
+		s.lo += a.lo - nd * __pio2_split[3];
+		*r = fast_two_sum(s.hi, s.lo);
+		return n;
+	}
+	return __rem_pio2(x, r);
 }
 
 /* Branch-free quadrant handling: the quadrant of a random argument is
@@ -56,7 +81,7 @@ static always_inline double negate_if(int c, double v)
 /* sin(n pi/2 + r) */
 static always_inline double sin_quadrant(int n, dd_t r)
 {
-	double s = __sin_kernel(r), c = __cos_kernel(r);
+	double s = sin_k(r), c = cos_k(r);
 	return negate_if(n & 2, pick(n, s, c));
 }
 
@@ -65,12 +90,14 @@ double sin(double x)
 	uint32_t top = TOP12(x) & 0x7ff;
 	if (top < 0x3e5) {                     /* |x| < 2^-26 */
 		if (top < 0x010) fp_force_eval(x * x);   /* underflow for subnormal */
-		if (x != 0) fp_force_eval(x + 0x1p-1000);
-		return x;
+		/* the true value lies strictly beyond/before x by far less than
+		 * half an ulp: nudge so that directed rounding goes the right way
+		 * (to nearest this is x itself); zero keeps its sign */
+		return x == 0 ? x : x - x * 0x1p-60;
 	}
 	if (top >= 0x7ff) return __math_invalid(x);
 	dd_t r;
-	int n = __rem_pio2(x, &r);
+	int n = reduce(x, &r);
 	return sin_quadrant(n, r);
 }
 
@@ -83,7 +110,7 @@ double cos(double x)
 	}
 	if (top >= 0x7ff) return __math_invalid(x);
 	dd_t r;
-	int n = __rem_pio2(x, &r);
+	int n = reduce(x, &r);
 	return sin_quadrant(n + 1, r);           /* cos x = sin(x + pi/2) */
 }
 
@@ -102,8 +129,8 @@ void sincos(double x, double *s, double *c)
 		return;
 	}
 	dd_t r;
-	int n = __rem_pio2(x, &r);
-	double sv = __sin_kernel(r), cv = __cos_kernel(r);
+	int n = reduce(x, &r);
+	double sv = sin_k(r), cv = cos_k(r);
 	*s = negate_if(n & 2, pick(n, sv, cv));
 	*c = negate_if((n + 1) & 2, pick(n, cv, sv));
 }
@@ -113,13 +140,15 @@ double tan(double x)
 	uint32_t top = TOP12(x) & 0x7ff;
 	if (top < 0x3e5) {
 		if (top < 0x010) fp_force_eval(x * x);
-		if (x != 0) fp_force_eval(x + 0x1p-1000);
-		return x;
+		/* the true value lies strictly beyond/before x by far less than
+		 * half an ulp: nudge so that directed rounding goes the right way
+		 * (to nearest this is x itself); zero keeps its sign */
+		return x == 0 ? x : x + x * 0x1p-60;
 	}
 	if (top >= 0x7ff) return __math_invalid(x);
 	dd_t r;
-	int n = __rem_pio2(x, &r);
-	dd_t s = __sin_dd(r), c = __cos_dd(r);
+	int n = reduce(x, &r);
+	dd_t s = sin_dd(r), c = cos_dd(r);
 	/* tan = s/c in even quadrants, -c/s in odd ones */
 	dd_t num = { pick(n, s.hi, c.hi), pick(n, s.lo, c.lo) };
 	dd_t den = { pick(n, c.hi, s.hi), pick(n, c.lo, s.lo) };
@@ -145,10 +174,10 @@ dd_t __sinpi_dd(double x)
 	r.lo += rr * __pi_dd[1];
 	r = fast_two_sum(r.hi, r.lo);
 	switch (k & 3) {
-	case 0: return __sin_dd(r);
-	case 1: return __cos_dd(r);
-	case 2: return dd_neg(__sin_dd(r));
-	default: return dd_neg(__cos_dd(r));
+	case 0: return sin_dd(r);
+	case 1: return cos_dd(r);
+	case 2: return dd_neg(sin_dd(r));
+	default: return dd_neg(cos_dd(r));
 	}
 }
 

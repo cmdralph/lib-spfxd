@@ -97,10 +97,12 @@ static __inline int priv(const pthread_mutex_t *m)
 	return !(m->__type & MT_SHARED);
 }
 
+/* Contended path.  There is deliberately no spinning before sleeping:
+ * measured on current x86 (where pause costs ~100+ cycles) and under
+ * virtualization, spinning only delayed the hand-off; the futex wait is
+ * entered at once, as glibc's default mutex does. */
 static int lock_word(pthread_mutex_t *m, clockid_t clk, const struct timespec *at)
 {
-	int spins = 100;
-	while (spins-- && m->__lock) a_spin();
 	if (!a_cas(&m->__lock, 0, 1)) return 0;
 	while (a_swap(&m->__lock, 2)) {
 		int r = __timedwait(&m->__lock, 2, clk, at, priv(m), 0);

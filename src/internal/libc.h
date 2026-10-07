@@ -89,4 +89,19 @@ hidden size_t __libc_strlen_safe(const char *s);
 
 #include "proto.h"
 
+/* -ffreestanding implies -fno-builtin, which would make every fixed-size
+ * memcpy/memset/memcmp in the library (struct copies, two-byte digit
+ * pairs, zeroing a small struct) an out-of-line call.  Inside the library
+ * these names go through the compiler builtins: constant sizes are
+ * expanded inline and everything else still calls the library's own
+ * routine.  The files that define them use parenthesized names, which the
+ * function-like macros leave alone. */
+#include <string.h>
+#ifndef SPFXD_NO_BUILTIN_MACROS
+#define memcpy(d, s, n) __builtin_memcpy(d, s, n)
+#define memset(d, c, n) __builtin_memset(d, c, n)
+#define memcmp(a, b, n) __builtin_memcmp(a, b, n)
+#define strlen(s) __builtin_strlen(s)
+#endif
+
 #endif

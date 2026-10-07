@@ -23,8 +23,16 @@ char *getenv(const char *name)
 {
 	size_t l = strchrnul(name, '=') - name;
 	if (l && !name[l] && __environ) {
-		for (char **e = __environ; *e; e++)
+		/* compare the first two bytes inline (the second is '=' or the
+		 * terminator for one-character names, which still must match)
+		 * before calling strncmp: almost every entry is rejected there */
+		unsigned char c0 = (unsigned char)name[0], c1 = (unsigned char)name[1];
+		if (!c1) c1 = '=';
+		for (char **e = __environ; *e; e++) {
+			const unsigned char *v = (const unsigned char *)*e;
+			if (v[0] != c0 || v[1] != c1) continue;
 			if (!strncmp(name, *e, l) && (*e)[l] == '=') return *e + l + 1;
+		}
 	}
 	return 0;
 }

@@ -69,21 +69,34 @@ static const char digit_pairs[200] =
 /* output primitives                                                       */
 /* ---------------------------------------------------------------------- */
 
-static void out(FILE *f, const char *s, size_t l)
+static noinline void out_slow(FILE *f, const char *s, size_t l)
 {
 	if (!l || (f->flags & F_ERR)) return;
-	if (f->lbf < 0 && (size_t)(f->wend - f->wpos) >= l) {
+	__fwritex((const unsigned char *)s, l, f);
+}
+
+/* Inline fast path: room in a fully buffered (or string) stream.  A
+ * stream in the error state has wend == wpos only after a failed write,
+ * so checking F_ERR here as well keeps output suppressed after errors. */
+static always_inline void out(FILE *f, const char *s, size_t l)
+{
+	if (likely(f->lbf < 0 && (size_t)(f->wend - f->wpos) >= l && !(f->flags & F_ERR))) {
 		memcpy(f->wpos, s, l);
 		f->wpos += l;
 		return;
 	}
-	__fwritex((const unsigned char *)s, l, f);
+	out_slow(f, s, l);
 }
 
 static void repeat(FILE *f, char c, long n)
 {
 	char buf[64];
 	if (n <= 0) return;
+	if (f->lbf < 0 && (size_t)(f->wend - f->wpos) >= (size_t)n && !(f->flags & F_ERR)) {
+		memset(f->wpos, c, (size_t)n);     /* straight into the buffer */
+		f->wpos += n;
+		return;
+	}
 	memset(buf, c, n < 64 ? (size_t)n : 64);
 	for (; n > 64; n -= 64) out(f, buf, 64);
 	out(f, buf, (size_t)n);
@@ -99,6 +112,13 @@ static long emit_field(FILE *f, const struct spec *sp, const char *pre, size_t p
 	long zeros, const char *body, size_t bl)
 {
 	long content = (long)pl + zeros + (long)bl;
+	if (likely(sp->width <= content && !zeros)) {
+		/* no padding at all: the common case */
+		if (content > INT_MAX) return -1;
+		if (pl) out(f, pre, pl);
+		out(f, body, bl);
+		return content;
+	}
 	long width = sp->width > content ? sp->width : content;
 	long fill = width - content;
 	if (width > INT_MAX) return -1;
@@ -250,7 +270,9 @@ static int parse_num(const char **ps)
 	const char *s = *ps;
 	int v = 0;
 	for (; (unsigned)(*s - '0') < 10; s++) {
-		if (v >= 0 && v <= (INT_MAX - (*s - '0')) / 10) v = v * 10 + (*s - '0');
+		int d = *s - '0';
+		/* v * 10 + d <= INT_MAX, without a division per digit */
+		if (v >= 0 && (v < INT_MAX / 10 || (v == INT_MAX / 10 && d <= INT_MAX % 10))) v = v * 10 + d;
 		else v = -1;
 	}
 	*ps = s;
@@ -277,8 +299,10 @@ static int parse_spec(const char **ps, struct spec *sp, int *err)
 	memset(sp, 0, sizeof *sp);
 	sp->prec = -1;
 
-	sp->argpos = parse_pos(&s);
-	if (sp->argpos < 0) goto inval;
+	if ((unsigned)(*s - '1') < 9) {
+		sp->argpos = parse_pos(&s);
+		if (sp->argpos < 0) goto inval;
+	}
 
 	for (;; s++) {
 		switch (*s) {

@@ -34,8 +34,10 @@ double sinh(double x)
 	uint32_t top = TOP12(a);
 	if (top < 0x3e5) {                          /* |x| < 2^-26 */
 		if (top < 0x010) fp_force_eval(x * x);
-		if (x != 0) fp_force_eval(x + 0x1p-1000);
-		return x;
+		/* the true value lies strictly beyond/before x by far less than
+		 * half an ulp: nudge so that directed rounding goes the right way
+		 * (to nearest this is x itself); zero keeps its sign */
+		return x == 0 ? x : x + x * 0x1p-60;
 	}
 	if (top >= 0x7ff) return x + x;
 	if (a <= 0.5) {
@@ -75,8 +77,10 @@ double tanh(double x)
 	uint32_t top = TOP12(a);
 	if (top < 0x3e4) {
 		if (top < 0x010) fp_force_eval(x * x);
-		if (x != 0) fp_force_eval(x + 0x1p-1000);
-		return x;
+		/* the true value lies strictly beyond/before x by far less than
+		 * half an ulp: nudge so that directed rounding goes the right way
+		 * (to nearest this is x itself); zero keeps its sign */
+		return x == 0 ? x : x - x * 0x1p-60;
 	}
 	if (top >= 0x7ff) return __builtin_isnan(x) ? x + x : (x < 0 ? -1.0 : 1.0);
 	if (a <= 0.55) {
@@ -99,8 +103,10 @@ double asinh(double x)
 	uint32_t top = TOP12(a);
 	if (top < 0x3e5) {
 		if (top < 0x010) fp_force_eval(x * x);
-		if (x != 0) fp_force_eval(x + 0x1p-1000);
-		return x;
+		/* the true value lies strictly beyond/before x by far less than
+		 * half an ulp: nudge so that directed rounding goes the right way
+		 * (to nearest this is x itself); zero keeps its sign */
+		return x == 0 ? x : x - x * 0x1p-60;
 	}
 	if (top >= 0x7ff) return x + x;
 	if (a > 0x1p28) {
@@ -143,8 +149,10 @@ double atanh(double x)
 	uint32_t top = TOP12(a);
 	if (top < 0x3e3) {
 		if (top < 0x010) fp_force_eval(x * x);
-		if (x != 0) fp_force_eval(x + 0x1p-1000);
-		return x;
+		/* the true value lies strictly beyond/before x by far less than
+		 * half an ulp: nudge so that directed rounding goes the right way
+		 * (to nearest this is x itself); zero keeps its sign */
+		return x == 0 ? x : x + x * 0x1p-60;
 	}
 	dd_t q = dd_div(two_sum(1.0, a), two_sum(1.0, -a));
 	double r = 0.5 * log_of_dd(q);
