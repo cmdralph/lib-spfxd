@@ -1,0 +1,7 @@
+/build/
+/lib/
+/tests/bin/
+/tests/out/
+/bench/bin/
+*.o
+bench/out/

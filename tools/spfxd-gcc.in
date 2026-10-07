@@ -1,0 +1,6 @@
+#!/bin/sh
+# spfxd-gcc — compile and link C programs against lib-spfxd instead of the
+# host C library.  All arguments are passed through to the real compiler.
+#   spfxd-gcc -O2 -o prog prog.c            dynamically linked
+#   spfxd-gcc -static -O2 -o prog prog.c    statically linked
+exec "${REALGCC:-@CC@}" -specs "@LIB@/spfxd-gcc.specs" "$@"
