@@ -76,53 +76,21 @@ static int log_special(double x, double *res)
 	return 0;                               /* positive subnormal */
 }
 
-double log(double x)
+#define POS_NORMAL(u) ((u) - 0x0010000000000000ULL < 0x7ff0000000000000ULL - 0x0010000000000000ULL)
+
+/* Slow paths: special arguments, subnormals and the rare uncertain
+ * roundings, through the accurate dd kernel. */
+static noinline double log_slow(double x)
 {
 	double r;
-	uint64_t u = asuint64(x);
-	if (likely(u - 0x0010000000000000ULL < 0x7ff0000000000000ULL - 0x0010000000000000ULL)) {
-		/* fast path for positive normal x:
-		 * log x = k ln2 + mh + ml, k ln2hi exact (42-bit constant) */
-		double mh, ml, r2;
-		int k = log_fast_core(x, &mh, &ml, &r2);
-		double kd = (double)k;
-		dd_t h = two_sum(kd * __log_ln2[0], mh);
-		double lo = h.lo + (kd * __log_ln2[1] + ml);
-		/* two_sum is exact; k ln2lo errs by < 2^-85 */
-		double eps = LOG_ERR(r2) + 0x1p-84;
-		double a;
-		if (likely(ziv_round(h.hi, lo, eps, &a))) return a;
-	}
 	if (log_special(x, &r)) return r;
 	dd_t l = __log_dd(x);
 	return l.hi + l.lo;
 }
 
-/* (mh + ml) * C for a dd constant C, as hi + lo (error < 2^-52 r2 more
- * than C times that of ml; see fastpath.h). */
-static always_inline dd_t log_scale(double mh, double ml, const double *c)
-{
-	dd_t p = two_prod(mh, c[0]);
-	p.lo += mh * c[1] + ml * c[0];
-	return p;
-}
-
-#define LOGN_ERR(r2) (0x1p-49 * (r2) + 0x1p-78)
-
-double log2(double x)
+static noinline double log2_slow(double x)
 {
 	double r;
-	uint64_t u = asuint64(x);
-	if (likely(u - 0x0010000000000000ULL < 0x7ff0000000000000ULL - 0x0010000000000000ULL)) {
-		double mh, ml, r2;
-		int k = log_fast_core(x, &mh, &ml, &r2);
-		dd_t p = log_scale(mh, ml, __inv_ln2);
-		dd_t h = two_sum((double)k, p.hi);
-		double lo = h.lo + p.lo;
-		double eps = LOGN_ERR(r2);
-		double a;
-		if (likely(ziv_round(h.hi, lo, eps, &a))) return a;
-	}
 	if (log_special(x, &r)) return r;
 	int k;
 	dd_t l = log_parts(x, &k);
@@ -131,29 +99,94 @@ double log2(double x)
 	return l.hi + l.lo;
 }
 
-double log10(double x)
+static noinline double log10_slow(double x)
 {
 	double r;
-	uint64_t u = asuint64(x);
-	if (likely(u - 0x0010000000000000ULL < 0x7ff0000000000000ULL - 0x0010000000000000ULL)) {
-		double mh, ml, r2;
-		int k = log_fast_core(x, &mh, &ml, &r2);
-		dd_t p = log_scale(mh, ml, __inv_ln10);
-		/* k log10(2) as an exact product plus the constant's tail */
-		dd_t t = two_prod((double)k, __log10_2[0]);
-		t.lo += (double)k * __log10_2[1];
-		dd_t h = two_sum(t.hi, p.hi);
-		double lo = h.lo + (t.lo + p.lo);
-		double eps = LOGN_ERR(r2) + 0x1p-100 * fabs(h.hi);
-		double a;
-		if (likely(ziv_round(h.hi, lo, eps, &a))) return a;
-	}
 	if (log_special(x, &r)) return r;
 	int k;
 	dd_t l = log_parts(x, &k);
 	l = dd_mul(l, dd_c(__inv_ln10));
 	if (k) l = dd_add(dd_mul_d(dd_c(__log10_2), (double)k), l);
 	return l.hi + l.lo;
+}
+
+static always_inline double log_body(int F, double x)
+{
+	if (likely(POS_NORMAL(asuint64(x)))) {
+		/* log x = k ln2 + mh + ml, k ln2hi exact (42-bit constant) */
+		double mh, ml, r2, a;
+		int k = log_fast_core_f(F, x, &mh, &ml, &r2);
+		double kd = (double)k;
+		dd_t h = two_sum(kd * __log_ln2[0], mh);
+		double lo = h.lo + FMADD(F, kd, __log_ln2[1], ml);
+		/* two_sum is exact; k ln2lo errs by < 2^-85 */
+		double eps = LOG_ERR(r2) + 0x1p-84;
+		if (likely(ziv_round(h.hi, lo, eps, &a))) return a;
+	}
+	return log_slow(x);
+}
+
+/* (mh + ml) * C for a dd constant C, as hi + lo (error < 2^-52 r2 more
+ * than C times that of ml; see fastpath.h). */
+static always_inline dd_t log_scale(int F, double mh, double ml, const double *c)
+{
+	dd_t p = two_prod_f(F, mh, c[0]);
+	p.lo += FMADD(F, mh, c[1], ml * c[0]);
+	return p;
+}
+
+#define LOGN_ERR(r2) (0x1p-49 * (r2) + 0x1p-78)
+
+static always_inline double log2_body(int F, double x)
+{
+	if (likely(POS_NORMAL(asuint64(x)))) {
+		double mh, ml, r2, a;
+		int k = log_fast_core_f(F, x, &mh, &ml, &r2);
+		dd_t p = log_scale(F, mh, ml, __inv_ln2);
+		dd_t h = two_sum((double)k, p.hi);
+		double lo = h.lo + p.lo;
+		if (likely(ziv_round(h.hi, lo, LOGN_ERR(r2), &a))) return a;
+	}
+	return log2_slow(x);
+}
+
+static always_inline double log10_body(int F, double x)
+{
+	if (likely(POS_NORMAL(asuint64(x)))) {
+		double mh, ml, r2, a;
+		int k = log_fast_core_f(F, x, &mh, &ml, &r2);
+		dd_t p = log_scale(F, mh, ml, __inv_ln10);
+		/* k log10(2) as an exact product plus the constant's tail */
+		dd_t t = two_prod_f(F, (double)k, __log10_2[0]);
+		t.lo = FMADD(F, (double)k, __log10_2[1], t.lo);
+		dd_t h = two_sum(t.hi, p.hi);
+		double lo = h.lo + (t.lo + p.lo);
+		double eps = LOGN_ERR(r2) + 0x1p-100 * fabs(h.hi);
+		if (likely(ziv_round(h.hi, lo, eps, &a))) return a;
+	}
+	return log10_slow(x);
+}
+
+static FMA_TARGET double log_fma(double x) { return log_body(1, x); }
+static FMA_TARGET double log2_fma(double x) { return log2_body(1, x); }
+static FMA_TARGET double log10_fma(double x) { return log10_body(1, x); }
+
+double log(double x)
+{
+	if (HAVE_FMA()) return log_fma(x);
+	return log_body(0, x);
+}
+
+double log2(double x)
+{
+	if (HAVE_FMA()) return log2_fma(x);
+	return log2_body(0, x);
+}
+
+double log10(double x)
+{
+	if (HAVE_FMA()) return log10_fma(x);
+	return log10_body(0, x);
 }
 
 double log1p(double x)

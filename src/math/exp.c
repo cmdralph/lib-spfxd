@@ -77,15 +77,8 @@ double __exp_dd(dd_t x, int sign)
 	return __exp_finish(e, k, sign);
 }
 
-double exp(double x)
+static noinline double exp_slow(double x)
 {
-	/* fast path: normal results (|x| <= 708) whose rounding is certain */
-	if (likely((asuint64(x) & 0x7fffffffffffffffULL) - asuint64(0x1p-54) <=
-	           asuint64(708.0) - asuint64(0x1p-54))) {
-		double hi, lo, a;
-		int s = exp_fast_core(x, 0.0, &hi, &lo);
-		if (likely(ziv_round(hi, lo, EXP_EPS, &a))) return scale_normal(a, s);
-	}
 	uint32_t top = TOP12(x) & 0x7ff;
 	if (unlikely(top >= 0x408)) {            /* |x| >= 512, inf or nan */
 		if (__builtin_isnan(x)) return x + x;
@@ -97,6 +90,43 @@ double exp(double x)
 	}
 	return __exp_dd(dd_from(x), 0);
 }
+
+static always_inline double exp_body(int F, double x)
+{
+	/* fast path: normal results (|x| <= 708) whose rounding is certain */
+	if (likely((asuint64(x) & 0x7fffffffffffffffULL) - asuint64(0x1p-54) <=
+	           asuint64(708.0) - asuint64(0x1p-54))) {
+		double hi, lo, a, eps;
+		int s = exp_fast_core_f(F, x, 0.0, &hi, &lo, &eps);
+		if (likely(ziv_round(hi, lo, eps, &a))) return scale_normal(a, s);
+	}
+	return exp_slow(x);
+}
+
+static FMA_TARGET double exp_fma(double x) { return exp_body(1, x); }
+
+double exp(double x)
+{
+	if (HAVE_FMA()) return exp_fma(x);
+	return exp_body(0, x);
+}
+
+/* exp(a x) for a dd constant a (ln2, ln10): the product is a dd good to
+ * 2^-96 relative, far inside EXP_EPS. */
+static always_inline double exp_scaled_body(int F, double x, const double *a, double lim)
+{
+	dd_t t = two_prod_f(F, x, a[0]);
+	t.lo = FMADD(F, x, a[1], t.lo);
+	if (likely(fabs(x) <= lim)) {
+		double hi, lo, r, eps;
+		int s = exp_fast_core_f(F, t.hi, t.lo, &hi, &lo, &eps);
+		if (likely(ziv_round(hi, lo, eps, &r))) return scale_normal(r, s);
+	}
+	return __exp_dd(fast_two_sum(t.hi, t.lo), 0);
+}
+
+static FMA_TARGET double exp2_fma(double x) { return exp_scaled_body(1, x, __ln2, 1021.0); }
+static FMA_TARGET double exp10_fma(double x) { return exp_scaled_body(1, x, __ln10, 307.0); }
 
 double exp2(double x)
 {
@@ -111,15 +141,8 @@ double exp2(double x)
 	}
 	/* exact powers of two are common enough to deserve a fast exact path */
 	if (x == (double)(int)x && x >= -1022 && x <= 1023) return pow2i((int)x);
-	dd_t t = two_prod(x, __ln2[0]);
-	t.lo += x * __ln2[1];
-	if (likely(fabs(x) <= 1021.0)) {
-		/* x ln2 is a dd good to 2^-96 relative: far inside EXP_EPS */
-		double hi, lo, a;
-		int s = exp_fast_core(t.hi, t.lo, &hi, &lo);
-		if (likely(ziv_round(hi, lo, EXP_EPS, &a))) return scale_normal(a, s);
-	}
-	return __exp_dd(fast_two_sum(t.hi, t.lo), 0);
+	if (HAVE_FMA()) return exp2_fma(x);
+	return exp_scaled_body(0, x, __ln2, 1021.0);
 }
 
 double exp10(double x)
@@ -133,14 +156,8 @@ double exp10(double x)
 	} else if (unlikely(top < 0x3c9)) {
 		return 1.0 + x;
 	}
-	dd_t t = two_prod(x, __ln10[0]);
-	t.lo += x * __ln10[1];
-	if (likely(fabs(x) <= 307.0)) {
-		double hi, lo, a;
-		int s = exp_fast_core(t.hi, t.lo, &hi, &lo);
-		if (likely(ziv_round(hi, lo, EXP_EPS, &a))) return scale_normal(a, s);
-	}
-	return __exp_dd(fast_two_sum(t.hi, t.lo), 0);
+	if (HAVE_FMA()) return exp10_fma(x);
+	return exp_scaled_body(0, x, __ln10, 307.0);
 }
 
 double pow10(double x)

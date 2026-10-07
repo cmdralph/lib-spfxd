@@ -11,6 +11,7 @@
  */
 #include <math.h>
 #include "fp.h"
+#include "fastpath.h"
 
 static dd_t atan_unit(dd_t v)
 {
@@ -59,24 +60,24 @@ static always_inline double sel(uint64_t m, double a, double b)
 	return asdouble((asuint64(b) & m) | (asuint64(a) & ~m));
 }
 
-static always_inline int atan_fast(double x, double *res)
+static always_inline int atan_fast(int F, double x, double *res)
 {
 	double v = fabs(x);
 	uint64_t big = -(uint64_t)(v > 1.0);          /* all ones when v > 1 */
 	double p = sel(big, v, 1.0), q = sel(big, 1.0, v);
 	int k = iround(16.0 * (p / q));
 	double c = (double)k * 0.0625;
-	dd_t cq = two_prod(c, q), cp = two_prod(c, p);
+	dd_t cq = two_prod_f(F, c, q), cp = two_prod_f(F, c, p);
 	dd_t num = { p - cq.hi, -cq.lo };
 	dd_t den = two_sum(q, cp.hi);
 	den.lo += cp.lo;
 	/* u = num / den: first approximation, then the exact residual */
 	double uh = num.hi / den.hi;
-	dd_t t = two_prod(uh, den.hi);
+	dd_t t = two_prod_f(F, uh, den.hi);
 	double rr = ((num.hi - t.hi) - t.lo) + num.lo - uh * den.lo;
 	double ul = rr / den.hi;
 	double z = uh * uh;
-	double u3 = uh * z * poly(__atan_poly, 5, z);
+	double u3 = uh * z * poly_f(F, __atan_poly, 5, z);
 	dd_t s = fast_two_sum(__atan_tab[2 * k], uh);
 	double lo = s.lo + (__atan_tab[2 * k + 1] + ul + u3);
 	/* v > 1: pi/2 - (s.hi + lo); the selects keep this branch-free */
@@ -93,12 +94,17 @@ static always_inline int atan_fast(double x, double *res)
 	return asuint64(a) == asuint64(b);
 }
 
+static FMA_TARGET int atan_fast_fma(double x, double *res)
+{
+	return atan_fast(1, x, res);
+}
+
 double atan(double x)
 {
 	uint32_t top = TOP12(x) & 0x7ff;
 	if (likely(top - 0x3e4 < 0x435 - 0x3e4)) {   /* 2^-27 <= |x| < 2^54 */
 		double r;
-		if (likely(atan_fast(x, &r))) return r;
+		if (likely(HAVE_FMA() ? atan_fast_fma(x, &r) : atan_fast(0, x, &r))) return r;
 	}
 	if (top < 0x3e4) {                       /* |x| < 2^-27 */
 		if (top < 0x010) fp_force_eval(x * x);

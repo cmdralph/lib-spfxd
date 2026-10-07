@@ -9,6 +9,7 @@
  */
 #include <math.h>
 #include "fp.h"
+#include "fastpath.h"
 
 /* Inlinable kernels; the hidden __sin_dd etc. below wrap them for the
  * other files that need them (gamma, sinpi, complex). */
@@ -46,24 +47,6 @@ double __sin_kernel(dd_t r) { return sin_k(r); }
 dd_t __cos_dd(dd_t r) { return cos_dd(r); }
 double __cos_kernel(dd_t r) { return cos_k(r); }
 
-/* x mod pi/2 with the medium-range reduction of rem_pio2.c inlined (the
- * common case); huge arguments still go through __rem_pio2. */
-static always_inline int reduce(double x, dd_t *r)
-{
-	if (likely(fabs(x) < 0x1.921fb54442d18p20)) {
-		double z = x * __two_over_pi;
-		int n = iround(z);
-		double nd = (double)n;
-		double y1 = x - nd * __pio2_split[0];
-		dd_t a = two_sum(y1, -nd * __pio2_split[1]);
-		dd_t s = two_sum(a.hi, -nd * __pio2_split[2]);
-		s.lo += a.lo - nd * __pio2_split[3];
-		*r = fast_two_sum(s.hi, s.lo);
-		return n;
-	}
-	return __rem_pio2(x, r);
-}
-
 /* Branch-free quadrant handling: the quadrant of a random argument is
  * unpredictable, so both kernels are evaluated (they are independent and
  * overlap in the pipeline) and the result is selected with bit masks. */
@@ -97,7 +80,7 @@ double sin(double x)
 	}
 	if (top >= 0x7ff) return __math_invalid(x);
 	dd_t r;
-	int n = reduce(x, &r);
+	int n = rem_pio2_inline(x, &r);
 	return sin_quadrant(n, r);
 }
 
@@ -110,7 +93,7 @@ double cos(double x)
 	}
 	if (top >= 0x7ff) return __math_invalid(x);
 	dd_t r;
-	int n = reduce(x, &r);
+	int n = rem_pio2_inline(x, &r);
 	return sin_quadrant(n + 1, r);           /* cos x = sin(x + pi/2) */
 }
 
@@ -129,7 +112,7 @@ void sincos(double x, double *s, double *c)
 		return;
 	}
 	dd_t r;
-	int n = reduce(x, &r);
+	int n = rem_pio2_inline(x, &r);
 	double sv = sin_k(r), cv = cos_k(r);
 	*s = negate_if(n & 2, pick(n, sv, cv));
 	*c = negate_if((n + 1) & 2, pick(n, cv, sv));
@@ -147,7 +130,7 @@ double tan(double x)
 	}
 	if (top >= 0x7ff) return __math_invalid(x);
 	dd_t r;
-	int n = reduce(x, &r);
+	int n = rem_pio2_inline(x, &r);
 	dd_t s = sin_dd(r), c = cos_dd(r);
 	/* tan = s/c in even quadrants, -c/s in odd ones */
 	dd_t num = { pick(n, s.hi, c.hi), pick(n, s.lo, c.lo) };

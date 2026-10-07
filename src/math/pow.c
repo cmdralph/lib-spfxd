@@ -24,6 +24,35 @@ static int int_kind(double y)
 	return (u & frac) ? 1 : 2;
 }
 
+/* exp(y log x) when its rounding is certain: returns 1 and the (signed)
+ * result in *res, or 0.  Error budget in fastpath.h (log_acc_core,
+ * exp_fast_core_f): an error et in y log x is at most 2.01 et absolute on
+ * the scale of hi < 2. */
+static always_inline int pow_fast(int F, double x, double y, int sign, double *res)
+{
+	double el;
+	dd_t L = log_acc_core_f(F, x, &el);
+	dd_t t = two_prod_f(F, y, L.hi);
+	double ylo = y * L.lo;
+	t.lo += ylo;
+	if (unlikely(!(fabs(t.hi) <= 708.0))) return 0;
+	/* error of t: |y| el, plus two roundings in t.lo */
+	double et = fabs(y) * el + 0x1p-51 * (fabs(t.lo) + fabs(ylo));
+	double hi, lo, eps;
+	int sc = exp_fast_core_f(F, t.hi, t.lo, &hi, &lo, &eps);
+	/* the sign goes in before rounding (exact), for directed modes */
+	if (sign) { hi = -hi; lo = -lo; }
+	double a;
+	if (!ziv_round(hi, lo, eps + 2.01 * et, &a)) return 0;
+	*res = scale_normal(a, sc);
+	return 1;
+}
+
+static FMA_TARGET int pow_fast_fma(double x, double y, int sign, double *res)
+{
+	return pow_fast(1, x, y, sign, res);
+}
+
 double pow(double x, double y)
 {
 	uint64_t ux = asuint64(x), uy = asuint64(y);
@@ -74,22 +103,8 @@ double pow(double x, double y)
 
 	/* fast path: x normal, result normal (|y log x| <= 708) */
 	if (likely(EXP_BITS(x) != 0)) {
-		double el;
-		dd_t L = log_acc_core(x, &el);
-		dd_t t = two_prod(y, L.hi);
-		double ylo = y * L.lo;
-		t.lo += ylo;
-		if (likely(fabs(t.hi) <= 708.0)) {
-			/* error of t: |y| el, plus two roundings in t.lo */
-			double et = fabs(y) * el + 0x1p-51 * (fabs(t.lo) + fabs(ylo));
-			double hi, lo, a;
-			int sc = exp_fast_core(t.hi, t.lo, &hi, &lo);
-			/* hi < 2: an error et in the exponent is at most 2.01 et
-			 * absolute on the scale of hi */
-			/* the sign goes in before rounding (exact), for directed modes */
-			if (sign) { hi = -hi; lo = -lo; }
-			if (likely(ziv_round(hi, lo, EXP_EPS + 2.01 * et, &a))) return scale_normal(a, sc);
-		}
+		double r;
+		if (likely(HAVE_FMA() ? pow_fast_fma(x, y, sign, &r) : pow_fast(0, x, y, sign, &r))) return r;
 	}
 	dd_t l = __log_dd(x);
 	dd_t t = two_prod(y, l.hi);
