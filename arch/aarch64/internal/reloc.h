@@ -4,6 +4,8 @@
 #define _SPFXD_RELOC_H
 #include <elf.h>
 
+#define ARCH_NAME     "aarch64"
+#define ELF_MACHINE   EM_AARCH64
 #define REL_NONE      R_AARCH64_NONE
 #define REL_SYMBOLIC  R_AARCH64_ABS64
 #define REL_GOT       R_AARCH64_GLOB_DAT

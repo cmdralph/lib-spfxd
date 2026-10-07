@@ -44,8 +44,8 @@ def ulp_err(got, ref, fmt):
 def to_frac(x):
     from fractions import Fraction
     m_, e_ = mp.frexp(x)
-    m_ = int(mp.ldexp(m_, 80))
-    e_ = int(e_) - 80
+    m_ = int(mp.ldexp(m_, 128))
+    e_ = int(e_) - 128
     return Fraction(m_) * (Fraction(2) ** e_)
 
 def exact_fmod(x, y):
@@ -105,7 +105,7 @@ CASES = [
     ("asinh", "d", 2000, -1e10, 1e10, None, 0.7), ("acosh", "d", 2000, 1, 1e10, None, 0.7),
     ("atanh", "d", 2000, -1, 1, None, 0.7),
     ("cbrt", "d", 2000, -1e300, 1e300, None, 0.6), ("sqrt", "d", 1000, 0, 1e300, None, 0.5),
-    ("erf", "d", 2000, -7, 7, None, 0.9), ("erfc", "d", 3000, -7, 27.3, None, 1.2),
+    ("erf", "d", 2000, -7, 7, None, 0.7), ("erfc", "d", 3000, -7, 27.3, None, 1.2),
     ("lgamma", "d", 2000, 0.01, 1e5, None, 1.0), ("lgamma", "d", 1000, 0.5, 3, None, 1.0),
     ("lgamma", "d", 1000, -50, -0.01, None, None),
     ("tgamma", "d", 2000, 0.01, 171, None, 1.2), ("tgamma", "d", 1000, -170, -0.01, None, 1.5),
@@ -141,11 +141,15 @@ CASES = [
 def main():
     driver = sys.argv[1]
     filt = sys.argv[2] if len(sys.argv) > 2 else None
+    # long double is x87 extended (64) or binary128 (113): ask the driver
+    run = os.environ.get("RUN", "").split()
+    ld = subprocess.run(run + [driver, "--ldbl"], capture_output=True, text=True, check=True).stdout.split()
+    FMT["l"] = (int(ld[0]), int(ld[1]))
     failed = 0
     for (fn, fmt, cnt, lo, hi, r2, bound) in CASES:
         if filt and filt not in fn: continue
         # RUN: optional emulator prefix for a cross-built driver (qemu-aarch64)
-        args = os.environ.get("RUN", "").split() + [driver, fn, str(cnt), repr(lo), repr(hi)]
+        args = run + [driver, fn, str(cnt), repr(lo), repr(hi)]
         if r2: args += [repr(r2[0]), repr(r2[1])]
         out = subprocess.run(args, capture_output=True, text=True, check=True).stdout
         f = ref_fn(fn)

@@ -4,6 +4,8 @@
 #define _SPFXD_RELOC_H
 #include <elf.h>
 
+#define ARCH_NAME     "x86_64"
+#define ELF_MACHINE   EM_X86_64
 #define REL_NONE      R_X86_64_NONE
 #define REL_SYMBOLIC  R_X86_64_64
 #define REL_GOT       R_X86_64_GLOB_DAT
@@ -13,7 +15,6 @@
 #define REL_DTPMOD    R_X86_64_DTPMOD64
 #define REL_DTPOFF    R_X86_64_DTPOFF64
 #define REL_TPOFF     R_X86_64_TPOFF64
-#define REL_TLSDESC   R_X86_64_TLSDESC
 #define REL_IRELATIVE R_X86_64_IRELATIVE
 /* x86-64 only */
 #define REL_PC32      R_X86_64_PC32

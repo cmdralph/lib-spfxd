@@ -43,7 +43,9 @@ static __inline int __arch_round_mode(void)
  * no finalizer (x0 = 0), as the kernel would. */
 static __inline __attribute__((__noreturn__)) void __arch_jump_to_entry(unsigned long entry, void *sp)
 {
-	__asm__ __volatile__ ("mov sp, %1\n\tmov x0, #0\n\tbr %0" :: "r"(entry), "r"(sp) : "memory");
+	/* x0 = 0: no rtld_fini for the program to register; x0 is clobbered
+	 * so neither input is allocated to it */
+	__asm__ __volatile__ ("mov sp, %1\n\tmov x0, #0\n\tbr %0" :: "r"(entry), "r"(sp) : "x0", "memory");
 	__builtin_unreachable();
 }
 

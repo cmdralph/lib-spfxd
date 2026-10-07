@@ -12,6 +12,7 @@
  */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,6 +83,11 @@ static double sample(double lo, double hi)
 
 int main(int argc, char **argv)
 {
+	if (argc == 2 && !strcmp(argv[1], "--ldbl")) {
+		/* the long double format, for the checker */
+		printf("%d %d\n", LDBL_MANT_DIG, LDBL_MIN_EXP - 1);
+		return 0;
+	}
 	if (argc < 5) {
 		fprintf(stderr, "usage: %s func count lo hi [lo2 hi2]\n", argv[0]);
 		return 2;

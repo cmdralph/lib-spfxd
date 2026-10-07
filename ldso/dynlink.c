@@ -26,8 +26,14 @@
  * allocated for a thread on its first __tls_get_addr for that module.
  * Such modules may not use the initial-exec model (REL_TPOFF).
  *
+ * TLS descriptors (REL_TLSDESC, the default dialect on AArch64) resolve
+ * to arch resolvers: __tlsdesc_static returns a fixed offset from the
+ * thread pointer, __tlsdesc_dynamic goes through __tls_get_addr for
+ * modules loaded by dlopen.  x86-64 code uses the traditional dialect;
+ * its TLSDESC relocations are not supported.
+ *
  * dlclose never unmaps: objects stay loaded until exit (their destructors
- * run at exit).  TLS descriptors (REL_TLSDESC) are not supported.
+ * run at exit).
  */
 #include <dlfcn.h>
 #include <elf.h>
@@ -317,6 +323,10 @@ struct moved { size_t from, to, size; };
 static struct moved *moved;
 static size_t nmoved;
 
+#ifdef REL_TLSDESC
+hidden size_t __tlsdesc_static(size_t *), __tlsdesc_dynamic(size_t *);
+#endif
+
 static int do_relocs(struct dso *dso, const Elf64_Rela *rel, size_t size)
 {
 	unsigned char *base = dso->base;
@@ -406,6 +416,32 @@ static int do_relocs(struct dso *dso, const Elf64_Rela *rel, size_t size)
 			*where = (def.sym ? def.sym->st_value : 0) + addend - (def.dso ? def.dso->tls.offset : 0);
 #endif
 			break;
+#ifdef REL_TLSDESC
+		case REL_TLSDESC: {
+			size_t off = (def.sym ? def.sym->st_value : 0) + addend;
+			if (def.dso && def.dso->dyn_tls) {
+				/* argument for __tls_get_addr; lives as long as the
+				 * object (never unmapped) */
+				size_t *ti = malloc(2 * sizeof *ti);
+				if (!ti) {
+					error("%s: out of memory", dso->name);
+					return -1;
+				}
+				ti[0] = def.dso->tls_id;
+				ti[1] = off;
+				where[0] = (size_t)__tlsdesc_dynamic;
+				where[1] = (size_t)ti;
+			} else {
+				where[0] = (size_t)__tlsdesc_static;
+#if TLS_ABOVE_TP
+				where[1] = off + (def.dso ? def.dso->tls.offset : 0);
+#else
+				where[1] = off - (def.dso ? def.dso->tls.offset : 0);
+#endif
+			}
+			break;
+		}
+#endif
 		default:
 			error("%s: unsupported relocation type %u", dso->name, type);
 			return -1;
@@ -498,7 +534,7 @@ static int map_library(int fd, struct dso *p, int allow_exec)
 	if (l < (ssize_t)sizeof u.eh) return -1;
 	Elf64_Ehdr *eh = &u.eh;
 	if (memcmp(eh->e_ident, ELFMAG, SELFMAG) || eh->e_ident[EI_CLASS] != ELFCLASS64 ||
-	    eh->e_ident[EI_DATA] != ELFDATA2LSB || eh->e_machine != EM_X86_64 ||
+	    eh->e_ident[EI_DATA] != ELFDATA2LSB || eh->e_machine != ELF_MACHINE ||
 	    (eh->e_type != ET_DYN && !(allow_exec && eh->e_type == ET_EXEC)) ||
 	    eh->e_phentsize < sizeof(Elf64_Phdr)) {
 		errno = ENOEXEC;
@@ -1029,7 +1065,7 @@ static char *default_sys_path(void)
 	return s;
 }
 
-/* Configuration: <libdir>/../etc/ld-spfxd-x86_64.path, one directory per
+/* Configuration: <libdir>/../etc/ld-spfxd-<arch>.path, one directory per
  * line or colon separated, replaces the built-in system path. */
 static void load_sys_path(void)
 {
@@ -1038,7 +1074,7 @@ static void load_sys_path(void)
 	char buf[PATH_MAX];
 	if (slash && (size_t)(slash - self) + 32 < sizeof buf) {
 		memcpy(buf, self, (size_t)(slash - self));
-		strcpy(buf + (slash - self), "/../etc/ld-spfxd-x86_64.path");
+		strcpy(buf + (slash - self), "/../etc/ld-spfxd-" ARCH_NAME ".path");
 		int fd = open(buf, O_RDONLY | O_CLOEXEC);
 		if (fd >= 0) {
 			char tmp[4096];

@@ -185,7 +185,10 @@ static long double fma_core(int sx, uint64_t mx, int ex, int sy, uint64_t my, in
 	return sR ? -r : r;
 }
 
-static const struct fmt F32 = { 24, -126, 127 }, F64 = { 53, -1022, 1023 }, F80 = { 64, -16382, 16383 };
+static const struct fmt F32 = { 24, -126, 127 }, F64 = { 53, -1022, 1023 };
+#if LDBL_MANT_DIG == 64
+static const struct fmt F80 = { 64, -16382, 16383 };
+#endif
 
 double fma(double x, double y, double z)
 {
@@ -244,6 +247,8 @@ float fmaf(float x, float y, float z)
 	                       (int)(uz >> 31), mz, ez - 150, F32);
 }
 
+#if LDBL_MANT_DIG == 64
+/* x87 extended; the binary128 fmal is in ldbl128.c */
 long double fmal(long double x, long double y, long double z)
 {
 	if (!__builtin_isfinite(x) || !__builtin_isfinite(y) || !__builtin_isfinite(z) || x == 0 || y == 0)
@@ -256,3 +261,4 @@ long double fmal(long double x, long double y, long double z)
 	return fma_core(a.i.se >> 15, a.i.m, ex - 16446, b.i.se >> 15, b.i.m, ey - 16446,
 	                c.i.se >> 15, c.i.m, ez - 16446, F80);
 }
+#endif
