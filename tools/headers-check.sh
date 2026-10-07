@@ -4,8 +4,20 @@
 # (self-contained) in C11, C99, GNU and C++ modes.
 set -e
 cd "$(dirname "$0")/.."
-CC=${CC:-gcc}
-INC="-nostdinc -Iinclude -Iarch/x86_64/include"
+HOSTARCH=$(uname -m)
+[ "$HOSTARCH" = arm64 ] && HOSTARCH=aarch64
+if [ -z "$ARCH" ]; then
+	ARCH=x86_64
+	[ "$HOSTARCH" = aarch64 ] && ARCH=aarch64
+fi
+LIB=lib
+[ "$ARCH" != x86_64 ] && LIB=lib-$ARCH
+if [ "$ARCH" = "$HOSTARCH" ]; then
+	CC=${CC:-gcc} NM=nm
+else
+	CC=${CC:-$ARCH-linux-gnu-gcc} NM=$ARCH-linux-gnu-nm
+fi
+INC="-nostdinc -Iinclude -Iarch/$ARCH/include"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -56,7 +68,7 @@ for stmt in text.split(';'):
         names.add(name)
 for n in sorted(names): print(n)
 PY
-nm -g --defined-only lib/libc.a 2>/dev/null | awk 'NF==3{print $3}' | sort -u > "$tmp/defined"
+$NM -g --defined-only $LIB/libc.a 2>/dev/null | awk 'NF==3{print $3}' | sort -u > "$tmp/defined"
 missing=$(comm -23 "$tmp/declared" "$tmp/defined")
 if [ -n "$missing" ]; then
 	echo "DECLARED BUT NOT DEFINED:"; echo "$missing" | sed 's/^/  /'; fail=1

@@ -17,19 +17,25 @@
 # library and run under qemu with its sysroot (HOSTRUN).
 cd "$(dirname "$0")" || exit 1
 TOP=$(cd .. && pwd)
-ARCH=${ARCH:-x86_64}
+HOSTARCH=$(uname -m)
+[ "$HOSTARCH" = arm64 ] && HOSTARCH=aarch64
+if [ -z "$ARCH" ]; then
+	ARCH=x86_64
+	[ "$HOSTARCH" = aarch64 ] && ARCH=aarch64
+fi
 if [ "$ARCH" = x86_64 ]; then
 	LIBDIR="$TOP/lib"
 	OUT="$TOP/tests/out"
-	HOSTCC=${HOSTCC:-cc}
 else
 	LIBDIR="$TOP/lib-$ARCH"
 	OUT="$TOP/tests/out-$ARCH"
+fi
+if [ "$HOSTARCH" = "$ARCH" ]; then
+	HOSTCC=${HOSTCC:-cc}
+else
 	HOSTCC=${HOSTCC:-$ARCH-linux-gnu-gcc}
-	if [ "$(uname -m)" != "$ARCH" ]; then
-		RUN=${RUN:-qemu-$ARCH}
-		HOSTRUN=${HOSTRUN:-qemu-$ARCH -L /usr/$ARCH-linux-gnu}
-	fi
+	RUN=${RUN:-qemu-$ARCH}
+	HOSTRUN=${HOSTRUN:-qemu-$ARCH -L /usr/$ARCH-linux-gnu}
 fi
 export RUN
 # lets tests skip checks that user-mode emulation cannot support

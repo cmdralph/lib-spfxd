@@ -8,6 +8,7 @@
  * failure.
  */
 #include <fenv.h>
+#include <float.h>
 
 #define TRAP_SHIFT 8
 

@@ -17,7 +17,8 @@
 #   crt/                     program entry objects
 #   ldso/                    dynamic linker (built into libc.so)
 
-ARCH     ?= x86_64
+# default: the host architecture when supported, else x86_64
+ARCH     ?= $(if $(filter aarch64 arm64,$(shell uname -m)),aarch64,x86_64)
 PREFIX   ?= /usr/local/spfxd
 
 # Per-architecture settings.  A non-native ARCH builds with the matching
@@ -210,22 +211,22 @@ $(L)/spfxd-gcc: tools/spfxd-gcc.in $(L)/spfxd-gcc.specs
 # Tests, benchmarks, audit
 # ---------------------------------------------------------------------------
 check: all
-	@$(MAKE) --no-print-directory -C tests run
+	@ARCH=$(ARCH) $(MAKE) --no-print-directory -C tests run
 
 check-static: all
-	@$(MAKE) --no-print-directory -C tests run MODES=static
+	@ARCH=$(ARCH) $(MAKE) --no-print-directory -C tests run MODES=static
 
 check-dynamic: all
-	@$(MAKE) --no-print-directory -C tests run MODES=dynamic
+	@ARCH=$(ARCH) $(MAKE) --no-print-directory -C tests run MODES=dynamic
 
 bench: all
 	@$(MAKE) --no-print-directory -C bench run
 
 audit: all
-	@sh tools/audit.sh
+	@ARCH=$(ARCH) sh tools/audit.sh
 
 headers-check: all
-	@sh tools/headers-check.sh
+	@ARCH=$(ARCH) sh tools/headers-check.sh
 
 # ---------------------------------------------------------------------------
 install: all
@@ -240,7 +241,12 @@ install: all
 	sed -e "s|@LIB@|$(PREFIX)/lib|g" -e "s|@CC@|$(CC)|g" tools/spfxd-gcc.in > $(DESTDIR)$(PREFIX)/bin/spfxd-gcc
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/spfxd-gcc
 
+# removes this architecture's build, library and test outputs only
 clean:
 	rm -rf $(O) $(L)
-	@$(MAKE) --no-print-directory -C tests clean
+ifeq ($(ARCH),x86_64)
+	rm -rf tests/out
 	@$(MAKE) --no-print-directory -C bench clean
+else
+	rm -rf tests/out-$(ARCH)
+endif
