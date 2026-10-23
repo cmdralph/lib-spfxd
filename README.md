@@ -530,7 +530,8 @@ What the port contains:
 | Dynamic linker | `R_AARCH64_*` relocations, including TLS descriptors (`R_AARCH64_TLSDESC`, GCC's default dialect on AArch64): a static resolver for modules present at startup and a register-preserving dynamic resolver for `dlopen`ed ones (`arch/aarch64/src/ldso/tlsdesc.S`). |
 | Atomics | The library is built with `-mno-outline-atomics` (LSE or LL/SC inline). Programs built with GCC's default outline atomics work too: libgcc's helpers find `__getauxval`. |
 | `long double` | IEEE binary128 (113-bit significand), implemented in software (see below). |
-| Strings, math | The portable C string routines (no assembly yet); the double/float libm is shared, with `fsqrt`, `fmadd` and `frintx` used directly. |
+| Strings | NEON assembly for `memcpy`, `memmove`, `memset`, `memchr`, `memrchr`, `memcmp`, `strlen`, `strchr`, `strchrnul`, `strcmp` and `strncmp` (`arch/aarch64/src/string/`). The routines built on them (`strnlen`, `strrchr`, `rawmemchr`, `strcat`, `bcmp`, `mempcpy`, `stpcpy`/`strcpy`) gain with them. NEON is part of the base architecture, so there is no run-time dispatch. Scans use aligned 16/32-byte loads that never cross into another page. A compare result is narrowed to 4 bits per byte (`shrn #4`) and located with `rbit`+`clz`. Copies use overlapping head and tail vectors around a 64-byte aligned loop. The string fuzzer checks them at every alignment and next to inaccessible pages on both sides. They have not been timed on real ARM64 hardware (only qemu was available). |
+| Math | The double/float libm is shared, with `fsqrt`, `fmadd` and `frintx` used directly. |
 
 **binary128 `long double`.** printf and strtold handle the 113-bit
 significand exactly (the formatting and Eisel-Lemire/big-number paths
@@ -579,7 +580,7 @@ documented error.
 | qsort | Merge sort (stable in practice) with a temporary buffer; in-place introsort when the buffer cannot be allocated. Stability is not guaranteed by the interface. |
 | utmpx | Uses the system's record layout with 32-bit times (as the files on disk are written). |
 | long double libm | `erfl`, `erfcl`, `lgammal`, `tgammal` and the Bessel functions are computed in double precision (both formats). On AArch64, binary128 arithmetic is software-emulated and slow. |
-| Architectures | x86-64 and AArch64 Linux only. macOS (including Apple Silicon) cannot be targeted: see [AArch64 port](#aarch64-arm64-port). AArch64 string functions are portable C, without assembly. |
+| Architectures | x86-64 and AArch64 Linux only. macOS (including Apple Silicon) cannot be targeted: see [AArch64 port](#aarch64-arm64-port). The AArch64 string routines use NEON only (no SVE variants). |
 | Accuracy limits | Bessel functions and `lgamma` for negative arguments lose relative accuracy close to their zeros. |
 | Rounding modes | The Ziv-path functions are correctly rounded in all modes. Other libm functions are designed for round-to-nearest; in directed modes they stay within about one ulp. |
 | NaN sign | Invalid operations return the hardware's default NaN: sign bit set on x86, clear on AArch64 (as glibc does on each). The sign of a NaN is unspecified by C. |
@@ -597,7 +598,7 @@ documented error.
 | `libc.a`, `libc.so`, `crt1.o`, `crti.o`, `crtn.o` (plus `Scrt1.o`, `rcrt1.o`) | Built by `make`. |
 | Full ISO C; substantial POSIX and Linux | Yes; see [What is implemented](#what-is-implemented). |
 | Own allocator | spfxd-alloc (`src/memory/`). |
-| Optimized string routines (assembly) | x86-64: SSE2 and AVX2, runtime dispatch (`arch/x86_64/src/string/`). AArch64: portable C. |
+| Optimized string routines (assembly) | x86-64: SSE2 and AVX2, runtime dispatch (`arch/x86_64/src/string/`). AArch64: NEON (`arch/aarch64/src/string/`). |
 | stdio with printf/scanf | Exact floating-point formatting, full scanf (`src/stdio/`). |
 | Robust strto* | Correctly rounded in all rounding modes; overflow-safe integer parsing. |
 | qsort | Merge sort with an in-place introsort fallback; O(n log n) worst case. |
