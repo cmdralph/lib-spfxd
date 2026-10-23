@@ -71,6 +71,19 @@ struct pthread {
 	char name[16];
 	char strerror_buf[48];
 	int stack_cacheable;              /* map_base is a library-made stack mapping */
+	/* robust mutexes held, in the kernel's robust_list_head format
+	 * (registered with set_robust_list on first use) */
+	struct {
+		void *volatile head;      /* circular list of &mutex->__next */
+		long futex_offset;        /* lock word relative to a list node */
+		void *volatile pending;   /* node being locked or unlocked */
+	} robust;
+	unsigned char robust_registered;
+	/* PTHREAD_PRIO_PROTECT: ceilings of the mutexes held (count per
+	 * priority) and the priority to return to when none is held */
+	unsigned char pp_boosted;
+	int pp_base;
+	unsigned short pp_count[100];
 };
 
 static __inline struct pthread *__self(void)
@@ -108,6 +121,8 @@ hidden int __clone(int (*)(void *), void *, int, void *, ...);
 hidden int __set_thread_area(void *);
 hidden void __unmapself(void *, size_t) __attribute__((__noreturn__));
 hidden void __pthread_tsd_run_dtors(void);
+hidden void __pthread_robust_exit(struct pthread *);
+hidden void __pthread_pp_rebase(struct pthread *, int, int);
 hidden void __do_cleanup_push(struct __spfxd_cleanup *);
 hidden void __do_cleanup_pop(struct __spfxd_cleanup *);
 hidden __attribute__((__noreturn__)) void __pthread_exit_internal(void *);

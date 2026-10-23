@@ -63,20 +63,21 @@ int pthread_cond_destroy(pthread_cond_t *c)
 struct cond_wait_cleanup {
 	pthread_cond_t *c;
 	pthread_mutex_t *m;
+	int relock;                       /* result of re-acquiring the mutex */
 };
 
 static void unwait(void *p)
 {
 	struct cond_wait_cleanup *w = p;
 	a_dec(&w->c->__waiters);
-	__pthread_mutex_lock_internal(w->m);
+	w->relock = __pthread_mutex_lock_internal(w->m);
 }
 
 hidden int __pthread_cond_timedwait_internal(pthread_cond_t *restrict c, pthread_mutex_t *restrict m,
 	clockid_t clk, const struct timespec *restrict at)
 {
 	struct __spfxd_cleanup cb;
-	struct cond_wait_cleanup w = { c, m };
+	struct cond_wait_cleanup w = { c, m, 0 };
 	int r;
 
 	if (at && (unsigned long)at->tv_nsec >= 1000000000UL) return EINVAL;
@@ -92,6 +93,8 @@ hidden int __pthread_cond_timedwait_internal(pthread_cond_t *restrict c, pthread
 	__spfxd_cleanup_push(&cb, unwait, &w);
 	r = __timedwait((volatile int *)&c->__seq, (int)seq, clk, at, !c->__shared, 1);
 	__spfxd_cleanup_pop(&cb, 1);
+	/* a robust mutex may come back EOWNERDEAD or ENOTRECOVERABLE */
+	if (w.relock) return w.relock;
 	return r == ETIMEDOUT ? ETIMEDOUT : 0;
 }
 

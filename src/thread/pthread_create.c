@@ -193,6 +193,8 @@ hidden void __pthread_exit_internal(void *result)
 		c->__fn(c->__arg);
 	}
 	__pthread_tsd_run_dtors();
+	/* robust mutexes still held pass to the next owner as EOWNERDEAD */
+	__pthread_robust_exit(self);
 	__tls_thread_exit(self);
 	__malloc_thread_exit(self);
 

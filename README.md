@@ -288,6 +288,29 @@ spin before sleeping; on current x86 (where `pause` costs over 100 cycles)
 and under virtualization, measurement showed spinning only delayed the
 hand-off.
 
+Every mutex protocol is implemented:
+- **Robust mutexes.** The lock word is in the kernel's robust-futex format
+  (owner tid, waiters and owner-died bits). Held mutexes are linked into
+  the thread's robust list, registered with `set_robust_list` on first use
+  and covered during each lock and unlock by its `list_op_pending` slot.
+  - When the owner dies, the next locker gets `EOWNERDEAD`, including
+    through `pthread_cond_wait`.
+  - `pthread_mutex_consistent` repairs the mutex. Unlocking it without
+    that makes it permanently `ENOTRECOVERABLE`, and every waiter is woken
+    to see that.
+  - Thread exit marks the mutexes it holds in user space, because a
+    detached thread unmaps its own control block before the final `exit`.
+    The kernel handles process death, including for process-shared
+    mutexes.
+- **Priority inheritance.** Uses `FUTEX_LOCK_PI`/`FUTEX_UNLOCK_PI`/
+  `FUTEX_TRYLOCK_PI`; `FUTEX_LOCK_PI2` serves `CLOCK_MONOTONIC`
+  deadlines, with a fallback for older kernels. It combines with robust.
+- **Priority protection.** Each thread counts the ceilings of the
+  mutexes it holds and runs at the highest of them and its own base
+  priority. `pthread_setschedparam`/`setschedprio` while boosted change
+  the base priority. Locking returns `EINVAL` when a real-time caller's
+  priority exceeds the ceiling.
+
 ### Locales, wide characters, iconv
 - **Locales.** The C/POSIX locale, plus a UTF-8 variant of it for
   `LC_CTYPE` (any name ending in `.UTF-8`/`.utf8`). Other categories behave
@@ -334,7 +357,7 @@ and dynamic:
 
 | Suite | What it checks |
 |---|---|
-| `tests/unit/*.c` (20 programs) | self-checking tests per subsystem: strings (including a fuzzer that covers every alignment, page-boundary cases with a `PROT_NONE` guard page, and multi-page operands), ctype, stdlib, stdio, scanf, malloc (hardening included), threads, signals, processes, file systems, time, locale, setjmp, fenv, startup, stack protector, network, IPC |
+| `tests/unit/*.c` (21 programs) | self-checking tests per subsystem: strings (including a fuzzer that covers every alignment, page-boundary cases with a `PROT_NONE` guard page, and multi-page operands), ctype, stdlib, stdio, scanf, malloc (hardening included), threads, mutex protocols (robust: owner death by thread exit, detached exit, process death, while others wait, inside `pthread_cond_wait`; priority inheritance; priority ceilings), signals, processes, file systems, time, locale, setjmp, fenv, startup, stack protector, network, IPC |
 | baseline-CPU runs | the string tests again with `LIBSPFXD_CPU=baseline`, so the SSE2 paths stay covered on AVX2 machines |
 | `tests/oracle/*.c` (11 programs) | built with the host compiler and C library and with lib-spfxd; outputs must be **byte-identical**: printf, strtod (plus 400,000 generated inputs aimed at the fast paths), math special cases (errno and exception flags included), the exactly specified `long double` functions (`fmal`, `sqrtl`, `rintl`, `fmodl`, `remquol`, … on random bit patterns in all four rounding modes), time zones (20 zones, 1900–2100), regex, iconv, netdb, strfmon, wordexp |
 | `tests/dynamic/` | shared-library dependency chains, `dlopen`/`dlsym`/`dlclose`, dynamic TLS, constructors and destructors; built twice, with traditional TLS and with TLS descriptors, and an assembly check that the descriptor resolvers (static, dynamic fast path, dynamic first-access path) preserve every general and vector register they must |
@@ -547,7 +570,7 @@ documented error.
 | Message catalogs | `catopen` always fails with `ENOENT`; `catgets` returns the default string. |
 | Locales | Only C/POSIX and the UTF-8 `LC_CTYPE` variant. Other locale names are rejected by `setlocale`. `LC_COLLATE`, `LC_MONETARY`, `LC_NUMERIC`, `LC_TIME` and `LC_MESSAGES` always behave as in the C locale. Wide-character classification is Unicode in every locale. |
 | iconv | No multi-byte East Asian encodings (Shift_JIS, EUC-*, GB*, Big5): `iconv_open` fails with `EINVAL`. BOM-less UTF-16/32 input is read in host byte order. |
-| Mutexes | Robust mutexes and the priority-inheritance and priority-protection protocols: the attribute setters return `ENOTSUP`. `PTHREAD_SCOPE_PROCESS`: `ENOTSUP`. |
+| Mutexes | `PTHREAD_PRIO_PROTECT` raises the priority only of threads with a real-time policy (`SCHED_FIFO`/`SCHED_RR`); other policies have no static priority to raise. Under qemu-user, robust mutexes survive thread exit but not the death of a whole process (the emulator does not support `set_robust_list`). `PTHREAD_SCOPE_PROCESS`: `ENOTSUP`. |
 | Dynamic linking | `dlclose` never unmaps a library (constructors' state stays valid). `dlopen` in statically linked programs fails with a `dlerror` message. |
 | aio | Each request runs on its own thread. Requests on one descriptor may complete in any order, as POSIX allows. In-progress requests cannot be cancelled (`AIO_NOTCANCELED`). |
 | getaddrinfo | Returns no `SOCK_RAW` entries. Numeric ports above 65535 are rejected. |
