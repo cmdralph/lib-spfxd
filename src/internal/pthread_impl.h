@@ -86,6 +86,12 @@ struct pthread {
 	unsigned short pp_count[100];
 };
 
+/* Bias of dtv-relative TLS offsets (DTPREL relocations hold the offset
+ * minus this; __tls_get_addr adds it back).  Nonzero on RISC-V. */
+#ifndef TLS_DTV_OFFSET
+#define TLS_DTV_OFFSET 0
+#endif
+
 static __inline struct pthread *__self(void)
 {
 #if TLS_ABOVE_TP

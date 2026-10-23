@@ -15,6 +15,7 @@ hidden _Noreturn void __dls2(unsigned char *base, size_t *sp);
 /* the entry stub is the same as a program's _start (crt_arch.h): pass the
  * initial stack pointer and the address of _DYNAMIC to _dlstart_c */
 #define START "_dlstart"
+#define START_NO_GP          /* RISC-V: gp belongs to the program */
 #define START_EXTRA ".hidden _dlstart\n"
 #include "crt_arch.h"
 

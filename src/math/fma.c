@@ -207,6 +207,12 @@ double fma(double x, double y, double z)
 		__asm__ ("fmadd %d0, %d1, %d2, %d3" : "=w"(r) : "w"(x), "w"(y), "w"(z));
 		if (likely(__builtin_fabs(r) >= DBL_MIN && __builtin_fabs(r) <= DBL_MAX)) return r;
 	}
+#elif defined(__riscv) && defined(__riscv_fdiv)
+	{
+		double r;
+		__asm__ ("fmadd.d %0, %1, %2, %3" : "=f"(r) : "f"(x), "f"(y), "f"(z));
+		if (likely(__builtin_fabs(r) >= DBL_MIN && __builtin_fabs(r) <= DBL_MAX)) return r;
+	}
 #endif
 	if (!__builtin_isfinite(x) || !__builtin_isfinite(y) || !__builtin_isfinite(z) || x == 0 || y == 0)
 		return x * y + z;
@@ -232,6 +238,12 @@ float fmaf(float x, float y, float z)
 	{
 		float r;
 		__asm__ ("fmadd %s0, %s1, %s2, %s3" : "=w"(r) : "w"(x), "w"(y), "w"(z));
+		if (likely(__builtin_fabsf(r) >= FLT_MIN && __builtin_fabsf(r) <= FLT_MAX)) return r;
+	}
+#elif defined(__riscv) && defined(__riscv_fdiv)
+	{
+		float r;
+		__asm__ ("fmadd.s %0, %1, %2, %3" : "=f"(r) : "f"(x), "f"(y), "f"(z));
 		if (likely(__builtin_fabsf(r) >= FLT_MIN && __builtin_fabsf(r) <= FLT_MAX)) return r;
 	}
 #endif

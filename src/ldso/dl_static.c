@@ -122,6 +122,6 @@ int _dl_find_object(void *pc, struct dl_find_object *res)
 
 void *__tls_get_addr(size_t *ti)
 {
-	return (char *)__self()->dtv[ti[0]] + ti[1];
+	return (char *)__self()->dtv[ti[0]] + ti[1] + TLS_DTV_OFFSET;
 }
 #endif

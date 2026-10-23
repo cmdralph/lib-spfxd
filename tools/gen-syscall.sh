@@ -5,6 +5,7 @@
 #
 #   tools/gen-syscall.sh x86_64  [cc]     (default cc: gcc)
 #   tools/gen-syscall.sh aarch64 [cc]     (default cc: aarch64-linux-gnu-gcc)
+#   tools/gen-syscall.sh riscv64 [cc]     (default cc: riscv64-linux-gnu-gcc)
 #
 # The UAPI <asm/unistd.h> is run through the target's preprocessor and every
 # __NR_ macro is expanded and evaluated, so indirections such as the generic
@@ -13,6 +14,7 @@ arch=${1:-x86_64}
 case $arch in
 	x86_64)  cc=${2:-gcc} ;;
 	aarch64) cc=${2:-aarch64-linux-gnu-gcc} ;;
+	riscv64) cc=${2:-riscv64-linux-gnu-gcc} ;;
 	*) echo "unknown arch $arch" >&2; exit 1 ;;
 esac
 out=arch/$arch/include/bits/syscall.h

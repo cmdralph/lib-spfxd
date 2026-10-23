@@ -387,4 +387,20 @@ typedef struct { uint64_t a_type; union { uint64_t a_val; } a_un; } Elf64_auxv_t
 #define R_AARCH64_TLSDESC 1031
 #define R_AARCH64_IRELATIVE 1032
 
+/* RISC-V dynamic relocations */
+#define R_RISCV_NONE          0
+#define R_RISCV_32            1
+#define R_RISCV_64            2
+#define R_RISCV_RELATIVE      3
+#define R_RISCV_COPY          4
+#define R_RISCV_JUMP_SLOT     5
+#define R_RISCV_TLS_DTPMOD32  6
+#define R_RISCV_TLS_DTPMOD64  7
+#define R_RISCV_TLS_DTPREL32  8
+#define R_RISCV_TLS_DTPREL64  9
+#define R_RISCV_TLS_TPREL32   10
+#define R_RISCV_TLS_TPREL64   11
+#define R_RISCV_TLSDESC       12
+#define R_RISCV_IRELATIVE     58
+
 #endif

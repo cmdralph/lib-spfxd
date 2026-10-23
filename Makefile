@@ -18,7 +18,7 @@
 #   ldso/                    dynamic linker (built into libc.so)
 
 # default: the host architecture when supported, else x86_64
-ARCH     ?= $(if $(filter aarch64 arm64,$(shell uname -m)),aarch64,x86_64)
+ARCH     ?= $(or $(filter aarch64 riscv64,$(patsubst arm64,aarch64,$(shell uname -m))),x86_64)
 PREFIX   ?= /usr/local/spfxd
 
 # Per-architecture settings.  A non-native ARCH builds with the matching
@@ -26,6 +26,7 @@ PREFIX   ?= /usr/local/spfxd
 # so several architectures can be built side by side:
 #   make                      x86-64: build/, lib/
 #   make ARCH=aarch64         AArch64: build-aarch64/, lib-aarch64/
+#   make ARCH=riscv64         RISC-V 64: build-riscv64/, lib-riscv64/
 HOSTARCH := $(shell uname -m)
 ifeq ($(ARCH),x86_64)
 ARCH_CFLAGS := -fcf-protection=none
@@ -35,8 +36,11 @@ else ifeq ($(ARCH),aarch64)
 # CPU feature detection before it exists: use inline LL/SC atomics
 ARCH_CFLAGS := -mno-outline-atomics
 LD_EMUL     := aarch64linux
+else ifeq ($(ARCH),riscv64)
+ARCH_CFLAGS :=
+LD_EMUL     := elf64lriscv
 else
-$(error unsupported ARCH=$(ARCH) (x86_64, aarch64))
+$(error unsupported ARCH=$(ARCH) (x86_64, aarch64, riscv64))
 endif
 ifneq ($(ARCH),$(HOSTARCH))
 CROSS_COMPILE ?= $(ARCH)-linux-gnu-
