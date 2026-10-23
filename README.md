@@ -183,7 +183,11 @@ and dynamic TLS (`__tls_get_addr`) for modules loaded with `dlopen`.
 `libc.so` relocates itself in two stages, then maps dependencies (search
 order: `DT_RPATH` when no `DT_RUNPATH`, `LD_LIBRARY_PATH`, `DT_RUNPATH`,
 system directories), resolves symbols through GNU or SysV hash tables,
-handles copy relocations, `IRELATIVE`, TLS relocations and RELRO, runs
+handles copy relocations, `IRELATIVE`, TLS relocations (including TLS
+descriptors, `-mtls-dialect=gnu2`: a static resolver, and for `dlopen`ed
+modules a resolver that reads the dtv directly and otherwise saves the
+full register and `xsave` state around `__tls_get_addr`;
+`arch/x86_64/src/ldso/tlsdesc.S`) and RELRO, runs
 constructors in dependency order, and provides `dlopen`/`dlsym`/`dlclose`/
 `dladdr`/`dl_iterate_phdr`, `r_debug` for debuggers, and
 `_dl_find_object` for the unwinder. Requests for `libc.so.6`, `libm.so.6`,
@@ -333,7 +337,7 @@ and dynamic:
 | `tests/unit/*.c` (20 programs) | self-checking tests per subsystem: strings (including a fuzzer that covers every alignment, page-boundary cases with a `PROT_NONE` guard page, and multi-page operands), ctype, stdlib, stdio, scanf, malloc (hardening included), threads, signals, processes, file systems, time, locale, setjmp, fenv, startup, stack protector, network, IPC |
 | baseline-CPU runs | the string tests again with `LIBSPFXD_CPU=baseline`, so the SSE2 paths stay covered on AVX2 machines |
 | `tests/oracle/*.c` (11 programs) | built with the host compiler and C library and with lib-spfxd; outputs must be **byte-identical**: printf, strtod (plus 400,000 generated inputs aimed at the fast paths), math special cases (errno and exception flags included), the exactly specified `long double` functions (`fmal`, `sqrtl`, `rintl`, `fmodl`, `remquol`, … on random bit patterns in all four rounding modes), time zones (20 zones, 1900–2100), regex, iconv, netdb, strfmon, wordexp |
-| `tests/dynamic/` | shared-library dependency chains, `dlopen`/`dlsym`/`dlclose`, dynamic TLS, constructors and destructors |
+| `tests/dynamic/` | shared-library dependency chains, `dlopen`/`dlsym`/`dlclose`, dynamic TLS, constructors and destructors; built twice, with traditional TLS and with TLS descriptors, and an assembly check that the descriptor resolvers (static, dynamic fast path, dynamic first-access path) preserve every general and vector register they must |
 | `tests/math/ulp_check.py` | mpmath-verified accuracy of libm (86 function/range cases; the `long double` format is taken from the build) |
 | `tests/math/judge.py` | correct rounding of `exp exp2 log log2 log10 pow atan` in all four rounding modes (mpmath) |
 
@@ -544,7 +548,7 @@ documented error.
 | Locales | Only C/POSIX and the UTF-8 `LC_CTYPE` variant. Other locale names are rejected by `setlocale`. `LC_COLLATE`, `LC_MONETARY`, `LC_NUMERIC`, `LC_TIME` and `LC_MESSAGES` always behave as in the C locale. Wide-character classification is Unicode in every locale. |
 | iconv | No multi-byte East Asian encodings (Shift_JIS, EUC-*, GB*, Big5): `iconv_open` fails with `EINVAL`. BOM-less UTF-16/32 input is read in host byte order. |
 | Mutexes | Robust mutexes and the priority-inheritance and priority-protection protocols: the attribute setters return `ENOTSUP`. `PTHREAD_SCOPE_PROCESS`: `ENOTSUP`. |
-| Dynamic linking | On x86-64, TLS descriptors (`R_X86_64_TLSDESC`, `-mtls-dialect=gnu2`) are not supported and are reported as an unsupported relocation (AArch64 supports them). `dlclose` never unmaps a library (constructors' state stays valid). `dlopen` in statically linked programs fails with a `dlerror` message. |
+| Dynamic linking | `dlclose` never unmaps a library (constructors' state stays valid). `dlopen` in statically linked programs fails with a `dlerror` message. |
 | aio | Each request runs on its own thread. Requests on one descriptor may complete in any order, as POSIX allows. In-progress requests cannot be cancelled (`AIO_NOTCANCELED`). |
 | getaddrinfo | Returns no `SOCK_RAW` entries. Numeric ports above 65535 are rejected. |
 | scanf | Follows ISO C for numeral prefixes: `"1.5e"` is a matching failure (glibc accepts it). |

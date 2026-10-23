@@ -26,11 +26,11 @@
  * allocated for a thread on its first __tls_get_addr for that module.
  * Such modules may not use the initial-exec model (REL_TPOFF).
  *
- * TLS descriptors (REL_TLSDESC, the default dialect on AArch64) resolve
- * to arch resolvers: __tlsdesc_static returns a fixed offset from the
- * thread pointer, __tlsdesc_dynamic goes through __tls_get_addr for
- * modules loaded by dlopen.  x86-64 code uses the traditional dialect;
- * its TLSDESC relocations are not supported.
+ * TLS descriptors (REL_TLSDESC: the default dialect on AArch64,
+ * -mtls-dialect=gnu2 on x86-64) resolve to arch resolvers:
+ * __tlsdesc_static returns a fixed offset from the thread pointer,
+ * __tlsdesc_dynamic reads the dtv, or calls __tls_get_addr, for modules
+ * loaded by dlopen.
  *
  * dlclose never unmaps: objects stay loaded until exit (their destructors
  * run at exit).

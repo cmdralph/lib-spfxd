@@ -9,3 +9,7 @@ long plug_tls_get(void) { return plug_tls; }
 void plug_tls_set(long v) { plug_tls = v; strcpy(plug_buf, "x"); }
 int plug_call_prog(int x) { return prog_exported(x) * 2; }
 int plug_strlen(const char *s) { return (int)strlen(s); }
+
+/* TLS descriptor register contract, dynamic-TLS resolver */
+#include "tlsdesc_check.h"
+DEFINE_TLSDESC_CHECK(plug_desc_addr, plug_tls);

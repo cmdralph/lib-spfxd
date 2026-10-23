@@ -96,17 +96,27 @@ for mode in $MODES; do
 		else diff "$ref.out" "$bin.out" | head -20; record "$mode/oracle/$n" 1; fi
 	done
 	if [ $mode = dynamic ]; then
-		d="$OUT/dynamic/dl"; mkdir -p "$d"
-		if "$CC" -O2 -fPIC -shared -o "$d/libdep.so" dynamic/libdep.c &&
-		   "$CC" -O2 -fPIC -shared -o "$d/libmid.so" dynamic/libmid.c -L"$d" -ldep &&
-		   "$CC" -O2 -fPIC -shared -o "$d/libplug.so" dynamic/libplug.c &&
-		   "$CC" -O2 -rdynamic -o "$d/dyn_main" dynamic/dyn_main.c -L"$d" -lmid -ldep -Wl,-rpath,'$ORIGIN' -lpthread; then
-			timeout "$TIMEOUT" $RUN "$d/dyn_main" >"$d/dyn_main.log" 2>&1; st=$?
-			[ $st != 0 ] && tail -20 "$d/dyn_main.log"
-			record "dynamic/dlopen" $st
-		else
-			record "dynamic/dlopen (build)" 1
-		fi
+		# once per TLS dialect: traditional (__tls_get_addr) and TLS
+		# descriptors, so both relocation paths of the loader run
+		case $ARCH in
+		x86_64)  DIALECTS="trad:-mtls-dialect=gnu desc:-mtls-dialect=gnu2" ;;
+		aarch64) DIALECTS="trad:-mtls-dialect=trad desc:-mtls-dialect=desc" ;;
+		*)       DIALECTS="trad:" ;;
+		esac
+		for dl in $DIALECTS; do
+			tag=${dl%%:*} tf=${dl#*:}
+			d="$OUT/dynamic/dl-$tag"; mkdir -p "$d"
+			if "$CC" -O2 $tf -fPIC -shared -o "$d/libdep.so" dynamic/libdep.c &&
+			   "$CC" -O2 $tf -fPIC -shared -o "$d/libmid.so" dynamic/libmid.c -L"$d" -ldep &&
+			   "$CC" -O2 $tf -fPIC -shared -o "$d/libplug.so" dynamic/libplug.c &&
+			   "$CC" -O2 $tf -rdynamic -o "$d/dyn_main" dynamic/dyn_main.c -L"$d" -lmid -ldep -Wl,-rpath,'$ORIGIN' -lpthread; then
+				timeout "$TIMEOUT" $RUN "$d/dyn_main" >"$d/dyn_main.log" 2>&1; st=$?
+				[ $st != 0 ] && tail -20 "$d/dyn_main.log"
+				record "dynamic/dlopen ($tag TLS)" $st
+			else
+				record "dynamic/dlopen ($tag TLS, build)" 1
+			fi
+		done
 	fi
 done
 
