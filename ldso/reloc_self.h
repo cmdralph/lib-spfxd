@@ -22,6 +22,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifndef IS_GOT_REL
+#ifdef REL_GOT
+#define IS_GOT_REL(t) ((t) == REL_GOT)
+#else
+#define IS_GOT_REL(t) 0
+#endif
+#endif
+
 #define RS_DT_RELR    36
 #define RS_DT_RELRSZ  35
 
@@ -70,7 +78,7 @@ void __rs_relocate(size_t base, const Elf64_Dyn *dynv, int self_syms)
 			if (type == REL_RELATIVE) {
 				*where = base + (size_t)r->r_addend;
 			} else if (self_syms && si && symtab &&
-			           (type == REL_GOT || type == REL_PLT || type == REL_SYMBOLIC)) {
+			           (IS_GOT_REL(type) || type == REL_PLT || type == REL_SYMBOLIC)) {
 				const Elf64_Sym *s = (const Elf64_Sym *)(base + symtab) + si;
 				if (s->st_shndx != SHN_UNDEF && ELF64_ST_TYPE(s->st_info) != STT_TLS)
 					*where = base + s->st_value + (type == REL_SYMBOLIC ? (size_t)r->r_addend : 0);

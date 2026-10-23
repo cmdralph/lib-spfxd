@@ -11,8 +11,8 @@ This repository is part of a series of parallel projects designed to push the bo
 ---
 
 **lib-spfxd** (Standard Primitive Framework & eXtensions / Definitions) is a
-complete C standard library for Linux on **x86-64** and **AArch64
-(ARM64)**, written from first principles. It has its own public headers, raw system-call layer, program
+complete C standard library for Linux on **x86-64**, **AArch64
+(ARM64)** and **RISC-V 64**, written from first principles. It has its own public headers, raw system-call layer, program
 startup objects, dynamic linker, allocator, stdio, math library, threads,
 locales, time zones and networking. It does not use the host C library or
 its headers, and it contains no code taken or ported from glibc, musl, the
@@ -31,6 +31,7 @@ $ make audit                         # nm/readelf/objdump/loader-trace audit of 
 
 $ make ARCH=aarch64 -j"$(nproc)"     # ARM64: lib-aarch64/ (cross-built on x86-64)
 $ make ARCH=aarch64 check            # the same test suite, under qemu-aarch64
+$ make ARCH=riscv64 check            # RISC-V 64 (lib-riscv64/), under qemu-riscv64
 ```
 
 ---
@@ -45,16 +46,17 @@ $ make ARCH=aarch64 check            # the same test suite, under qemu-aarch64
 6. [Benchmarks](#benchmarks)
 7. [Audit](#audit)
 8. [AArch64 (ARM64) port](#aarch64-arm64-port)
-9. [Unsupported features and documented differences](#unsupported-features-and-documented-differences)
-10. [Self-audit checklist](#self-audit-checklist)
-11. [License](#license)
+9. [RISC-V 64 port](#risc-v-64-port)
+10. [Unsupported features and documented differences](#unsupported-features-and-documented-differences)
+11. [Self-audit checklist](#self-audit-checklist)
+12. [License](#license)
 
 ---
 
 ## Building and using
 
 Requirements: GCC (or a GCC-compatible compiler driver) targeting
-x86-64 or AArch64 Linux, GNU make, binutils. Python 3 is needed only to regenerate
+x86-64, AArch64 or RISC-V 64 Linux, GNU make, binutils. Python 3 is needed only to regenerate
 tables (`tools/gen-*.py`). The libm accuracy tests additionally use mpmath.
 
 | Command | Result |
@@ -66,6 +68,7 @@ tables (`tools/gen-*.py`). The libm accuracy tests additionally use mpmath.
 | `make headers-check` | every public header compiles on its own |
 | `make install PREFIX=/opt/spfxd` | install headers, libraries and `bin/spfxd-gcc` |
 | `make ARCH=aarch64 …` | any of the above for AArch64, into `build-aarch64/` and `lib-aarch64/` (see [AArch64 port](#aarch64-arm64-port)) |
+| `make ARCH=riscv64 …` | the same for RISC-V 64, into `build-riscv64/` and `lib-riscv64/` (see [RISC-V 64 port](#risc-v-64-port)) |
 
 `ARCH` defaults to the host's architecture; x86-64 builds go to `build/`
 and `lib/`.
@@ -107,7 +110,7 @@ and diagnosis; also ignored for setuid programs).
 ```
 Makefile            build system (dependency tracking with -MMD)
 include/            public headers (ISO C, POSIX, Linux)
-arch/<arch>/        x86_64 and aarch64
+arch/<arch>/        x86_64, aarch64 and riscv64
   include/bits/     architecture parts of the public headers
   internal/         syscall/atomic/CPU-feature/relocation internals
   src/<dir>/        assembly and C that replaces src/<dir>/<same name>.c
@@ -158,8 +161,9 @@ architectures).
 GNU/BSD additions (`strlcpy`, `asprintf`, `getline`, `memmem`, `qsort_r`,
 `reallocarray`, `explicit_bzero`, `getrandom`, `pthread_setname_np`, …).
 
-`libc.so` exports 1,488 symbols on x86-64 (1,489 on AArch64, which adds
-`__stack_chk_guard` and `__getauxval` for the ABI and libgcc). Everything (math, threads, real-time,
+`libc.so` exports 1,488 symbols on x86-64 (1,489 on AArch64 and RISC-V
+64, which add `__stack_chk_guard` and `__getauxval` for the ABI and
+libgcc). Everything (math, threads, real-time,
 dynamic loading, sockets) lives in the one library; `libm.a`,
 `libpthread.a`, `libdl.a`, `librt.a`, … are empty archives so existing build
 lines keep working.
@@ -183,7 +187,11 @@ and dynamic TLS (`__tls_get_addr`) for modules loaded with `dlopen`.
 `libc.so` relocates itself in two stages, then maps dependencies (search
 order: `DT_RPATH` when no `DT_RUNPATH`, `LD_LIBRARY_PATH`, `DT_RUNPATH`,
 system directories), resolves symbols through GNU or SysV hash tables,
-handles copy relocations, `IRELATIVE`, TLS relocations and RELRO, runs
+handles copy relocations, `IRELATIVE`, TLS relocations (including TLS
+descriptors, `-mtls-dialect=gnu2`: a static resolver, and for `dlopen`ed
+modules a resolver that reads the dtv directly and otherwise saves the
+full register and `xsave` state around `__tls_get_addr`;
+`arch/x86_64/src/ldso/tlsdesc.S`) and RELRO, runs
 constructors in dependency order, and provides `dlopen`/`dlsym`/`dlclose`/
 `dladdr`/`dl_iterate_phdr`, `r_debug` for debuggers, and
 `_dl_find_object` for the unwinder. Requests for `libc.so.6`, `libm.so.6`,
@@ -247,7 +255,7 @@ an in-place introsort with ninther pivots and heapsort protection
   reduced exactly: Cody–Waite for moderate inputs, a 256-bit Payne–Hanek
   window of 2/π for huge ones. Measured worst cases are ≤ 0.6 ulp for the
   elementary double functions, ≤ 2 ulp for x87 `long double` and ≤ 1.4 ulp
-  for binary128 `long double` (AArch64). `float`
+  for binary128 `long double` (AArch64, RISC-V 64). `float`
   results are the double result rounded once: correctly rounded except
   in extremely rare double-rounding cases. lib-spfxd is correctly rounded on inputs where
   glibc is off by one ulp (examples verified with mpmath: `asinh`, `sinh`,
@@ -283,6 +291,29 @@ deferred and asynchronous cancellation, `pthread_kill`/`sigqueue`, C11
 spin before sleeping; on current x86 (where `pause` costs over 100 cycles)
 and under virtualization, measurement showed spinning only delayed the
 hand-off.
+
+Every mutex protocol is implemented:
+- **Robust mutexes.** The lock word is in the kernel's robust-futex format
+  (owner tid, waiters and owner-died bits). Held mutexes are linked into
+  the thread's robust list, registered with `set_robust_list` on first use
+  and covered during each lock and unlock by its `list_op_pending` slot.
+  - When the owner dies, the next locker gets `EOWNERDEAD`, including
+    through `pthread_cond_wait`.
+  - `pthread_mutex_consistent` repairs the mutex. Unlocking it without
+    that makes it permanently `ENOTRECOVERABLE`, and every waiter is woken
+    to see that.
+  - Thread exit marks the mutexes it holds in user space, because a
+    detached thread unmaps its own control block before the final `exit`.
+    The kernel handles process death, including for process-shared
+    mutexes.
+- **Priority inheritance.** Uses `FUTEX_LOCK_PI`/`FUTEX_UNLOCK_PI`/
+  `FUTEX_TRYLOCK_PI`; `FUTEX_LOCK_PI2` serves `CLOCK_MONOTONIC`
+  deadlines, with a fallback for older kernels. It combines with robust.
+- **Priority protection.** Each thread counts the ceilings of the
+  mutexes it holds and runs at the highest of them and its own base
+  priority. `pthread_setschedparam`/`setschedprio` while boosted change
+  the base priority. Locking returns `EINVAL` when a real-time caller's
+  priority exceeds the ceiling.
 
 ### Locales, wide characters, iconv
 - **Locales.** The C/POSIX locale, plus a UTF-8 variant of it for
@@ -330,15 +361,18 @@ and dynamic:
 
 | Suite | What it checks |
 |---|---|
-| `tests/unit/*.c` (20 programs) | self-checking tests per subsystem: strings (including a fuzzer that covers every alignment, page-boundary cases with a `PROT_NONE` guard page, and multi-page operands), ctype, stdlib, stdio, scanf, malloc (hardening included), threads, signals, processes, file systems, time, locale, setjmp, fenv, startup, stack protector, network, IPC |
+| `tests/unit/*.c` (21 programs) | self-checking tests per subsystem: strings (including a fuzzer that covers every alignment, page-boundary cases with a `PROT_NONE` guard page, and multi-page operands), ctype, stdlib, stdio, scanf, malloc (hardening included), threads, mutex protocols (robust: owner death by thread exit, detached exit, process death, while others wait, inside `pthread_cond_wait`; priority inheritance; priority ceilings), signals, processes, file systems, time, locale, setjmp, fenv, startup, stack protector, network, IPC |
 | baseline-CPU runs | the string tests again with `LIBSPFXD_CPU=baseline`, so the SSE2 paths stay covered on AVX2 machines |
 | `tests/oracle/*.c` (11 programs) | built with the host compiler and C library and with lib-spfxd; outputs must be **byte-identical**: printf, strtod (plus 400,000 generated inputs aimed at the fast paths), math special cases (errno and exception flags included), the exactly specified `long double` functions (`fmal`, `sqrtl`, `rintl`, `fmodl`, `remquol`, … on random bit patterns in all four rounding modes), time zones (20 zones, 1900–2100), regex, iconv, netdb, strfmon, wordexp |
-| `tests/dynamic/` | shared-library dependency chains, `dlopen`/`dlsym`/`dlclose`, dynamic TLS, constructors and destructors |
+| `tests/dynamic/` | shared-library dependency chains, `dlopen`/`dlsym`/`dlclose`, dynamic TLS, constructors and destructors; built twice, with traditional TLS and with TLS descriptors, and an assembly check that the descriptor resolvers (static, dynamic fast path, dynamic first-access path) preserve every general and vector register they must |
 | `tests/math/ulp_check.py` | mpmath-verified accuracy of libm (86 function/range cases; the `long double` format is taken from the build) |
 | `tests/math/judge.py` | correct rounding of `exp exp2 log log2 log10 pow atan` in all four rounding modes (mpmath) |
 
-Each architecture runs 69 test programs/cases; both currently pass 69/69
-(AArch64 under qemu-aarch64 user-mode emulation, see below).
+x86-64 and AArch64 each run 72 test programs/cases, including the
+dynamic-loading test once per TLS dialect. RISC-V 64 runs 71, because it
+has only the traditional TLS dialect. All three currently pass every case;
+AArch64 and RISC-V run under qemu user-mode emulation (see their port
+sections).
 
 Additional verification run during development (not part of `make check`
 because of its run time):
@@ -459,9 +493,10 @@ Reading the numbers:
 * headers never reach for host headers, and each compiles on its own;
 * the source tree contains no copyright notices of other C libraries.
 
-Current result: 35 checks passed, 0 failed, for both `make audit` and
-`make ARCH=aarch64 audit` (which uses the cross binutils and runs the test
-programs, and the loader trace, under qemu).
+Current result: 35 checks passed, 0 failed, for each of `make audit`,
+`make ARCH=aarch64 audit` and `make ARCH=riscv64 audit`. The last two
+use the cross binutils and run the test programs, and the loader trace,
+under qemu.
 
 ---
 
@@ -503,7 +538,8 @@ What the port contains:
 | Dynamic linker | `R_AARCH64_*` relocations, including TLS descriptors (`R_AARCH64_TLSDESC`, GCC's default dialect on AArch64): a static resolver for modules present at startup and a register-preserving dynamic resolver for `dlopen`ed ones (`arch/aarch64/src/ldso/tlsdesc.S`). |
 | Atomics | The library is built with `-mno-outline-atomics` (LSE or LL/SC inline). Programs built with GCC's default outline atomics work too: libgcc's helpers find `__getauxval`. |
 | `long double` | IEEE binary128 (113-bit significand), implemented in software (see below). |
-| Strings, math | The portable C string routines (no assembly yet); the double/float libm is shared, with `fsqrt`, `fmadd` and `frintx` used directly. |
+| Strings | NEON assembly for `memcpy`, `memmove`, `memset`, `memchr`, `memrchr`, `memcmp`, `strlen`, `strchr`, `strchrnul`, `strcmp` and `strncmp` (`arch/aarch64/src/string/`). The routines built on them (`strnlen`, `strrchr`, `rawmemchr`, `strcat`, `bcmp`, `mempcpy`, `stpcpy`/`strcpy`) gain with them. NEON is part of the base architecture, so there is no run-time dispatch. Scans use aligned 16/32-byte loads that never cross into another page. A compare result is narrowed to 4 bits per byte (`shrn #4`) and located with `rbit`+`clz`. Copies use overlapping head and tail vectors around a 64-byte aligned loop. The string fuzzer checks them at every alignment and next to inaccessible pages on both sides. They have not been timed on real ARM64 hardware (only qemu was available). |
+| Math | The double/float libm is shared, with `fsqrt`, `fmadd` and `frintx` used directly. |
 
 **binary128 `long double`.** printf and strtold handle the 113-bit
 significand exactly (the formatting and Eisel-Lemire/big-number paths
@@ -533,6 +569,45 @@ timings under an emulator say nothing about real hardware.
 
 ---
 
+## RISC-V 64 port
+
+The third architecture is RV64GC Linux with the LP64D ABI:
+
+```
+make ARCH=riscv64 -j"$(nproc)"          # cross: needs riscv64-linux-gnu-gcc
+lib-riscv64/spfxd-gcc -O2 prog.c -o prog
+qemu-riscv64 ./prog                     # on an x86-64 host
+make ARCH=riscv64 check                 # tests under qemu-riscv64
+make ARCH=riscv64 audit
+```
+
+It shares everything portable with the other two ports. It reuses:
+- the generic system-call table handling from the AArch64 port (no
+  `open`, `stat`, `poll`, `dup2`, `pause` or `fork`);
+- the variant-I TLS layout;
+- the binary128 `long double` library.
+
+`arch/riscv64/` holds what is specific:
+
+| Area | RISC-V 64 implementation |
+|---|---|
+| System calls | `ecall` with the number in `a7` and arguments in `a0`–`a5`. The table is generated by `tools/gen-syscall.sh riscv64`. `clone` takes `(flags, stack, ptid, tls, ctid)`, the same order as AArch64; this was checked under qemu before `__clone` was written. vDSO: `__vdso_clock_gettime`, `__vdso_gettimeofday`, `__vdso_clock_getres` (`LINUX_4.15`). |
+| Startup | A program's `_start` first loads `gp` from `__global_pointer$` with linker relaxation switched off for that instruction pair. The dynamic linker's entry leaves `gp` to the program. `crti`/`crtn` in `arch/riscv64/crt/`. |
+| TLS | Variant I with no TCB gap: `tp` points at the executable's TLS block, and `struct pthread` sits just below it. dtv-relative offsets (`R_RISCV_TLS_DTPREL64`) carry the psABI bias of −0x800, which `__tls_get_addr`, the dynamic linker and `dlsym` of TLS symbols undo (`TLS_DTV_OFFSET`). The canary is the global `__stack_chk_guard`. |
+| Signals | No `SA_RESTORER`: the kernel returns from handlers through its vDSO `rt_sigreturn`, and its `struct sigaction` has no restorer field (`ARCH_SIGRETURN_VDSO`). `ucontext_t` matches the kernel frame, with `uc_mcontext` at offset 176: 32 general registers with the pc in slot 0, then the 528-byte F/D/Q floating-point union. |
+| setjmp / ucontext | `ra`, `sp`, `s0`–`s11`, `fs0`–`fs11` (and the mask for `sigsetjmp`); `getcontext`/`setcontext`/`swapcontext`/`makecontext` with eight register arguments. `tp` and `gp` are never reloaded from a context. |
+| fenv | `fcsr` (flags in `fflags`, rounding in `frm`). RISC-V floating point never traps, so `feenableexcept` reports failure. The extra mode RMM, ties away from zero, is reported as `FLT_ROUNDS` 4. |
+| Dynamic linker | `R_RISCV_*` relocations. There is no `GLOB_DAT`: GOT entries carry `R_RISCV_64`. GCC 13 has no TLS-descriptor dialect for RISC-V, so the dynamic-loading test runs with traditional TLS only. |
+| Math | `fsqrt`, `fmadd` and `fcvt` with the dynamic rounding mode for `sqrt`, `fma` and `lrint`. `long double` is binary128 in software, as on AArch64. |
+| Strings | The portable C routines (no vector extension is assumed for RV64GC). |
+
+The same test suite runs under `qemu-riscv64`, with the same three
+emulator skips as AArch64, and the audit passes. The audit's libgcc
+allow-list includes `__clzdi2`, `__ctzdi2` and `__bswapsi2`: without the
+Zbb extension, RV64GC has no instructions for them.
+
+---
+
 ## Unsupported features and documented differences
 
 Nothing below is a silent stub: unsupported operations fail with the
@@ -543,19 +618,19 @@ documented error.
 | Message catalogs | `catopen` always fails with `ENOENT`; `catgets` returns the default string. |
 | Locales | Only C/POSIX and the UTF-8 `LC_CTYPE` variant. Other locale names are rejected by `setlocale`. `LC_COLLATE`, `LC_MONETARY`, `LC_NUMERIC`, `LC_TIME` and `LC_MESSAGES` always behave as in the C locale. Wide-character classification is Unicode in every locale. |
 | iconv | No multi-byte East Asian encodings (Shift_JIS, EUC-*, GB*, Big5): `iconv_open` fails with `EINVAL`. BOM-less UTF-16/32 input is read in host byte order. |
-| Mutexes | Robust mutexes and the priority-inheritance and priority-protection protocols: the attribute setters return `ENOTSUP`. `PTHREAD_SCOPE_PROCESS`: `ENOTSUP`. |
-| Dynamic linking | On x86-64, TLS descriptors (`R_X86_64_TLSDESC`, `-mtls-dialect=gnu2`) are not supported and are reported as an unsupported relocation (AArch64 supports them). `dlclose` never unmaps a library (constructors' state stays valid). `dlopen` in statically linked programs fails with a `dlerror` message. |
+| Mutexes | `PTHREAD_PRIO_PROTECT` raises the priority only of threads with a real-time policy (`SCHED_FIFO`/`SCHED_RR`); other policies have no static priority to raise. Under qemu-user, robust mutexes survive thread exit but not the death of a whole process (the emulator does not support `set_robust_list`). `PTHREAD_SCOPE_PROCESS`: `ENOTSUP`. |
+| Dynamic linking | `dlclose` never unmaps a library (constructors' state stays valid). `dlopen` in statically linked programs fails with a `dlerror` message. |
 | aio | Each request runs on its own thread. Requests on one descriptor may complete in any order, as POSIX allows. In-progress requests cannot be cancelled (`AIO_NOTCANCELED`). |
 | getaddrinfo | Returns no `SOCK_RAW` entries. Numeric ports above 65535 are rejected. |
 | scanf | Follows ISO C for numeral prefixes: `"1.5e"` is a matching failure (glibc accepts it). |
 | strtol | Follows C17: no `0b` binary prefix (C23 adds it; recent glibc accepts it under `_GNU_SOURCE`). |
 | qsort | Merge sort (stable in practice) with a temporary buffer; in-place introsort when the buffer cannot be allocated. Stability is not guaranteed by the interface. |
 | utmpx | Uses the system's record layout with 32-bit times (as the files on disk are written). |
-| long double libm | `erfl`, `erfcl`, `lgammal`, `tgammal` and the Bessel functions are computed in double precision (both formats). On AArch64, binary128 arithmetic is software-emulated and slow. |
-| Architectures | x86-64 and AArch64 Linux only. macOS (including Apple Silicon) cannot be targeted: see [AArch64 port](#aarch64-arm64-port). AArch64 string functions are portable C, without assembly. |
+| long double libm | `erfl`, `erfcl`, `lgammal`, `tgammal` and the Bessel functions are computed in double precision (both formats). On AArch64 and RISC-V, binary128 arithmetic is software-emulated and slow. |
+| Architectures | x86-64, AArch64 and RISC-V 64 Linux only. macOS (including Apple Silicon) cannot be targeted: see [AArch64 port](#aarch64-arm64-port). The AArch64 string routines use NEON only (no SVE variants). The RISC-V string routines are portable C (no RVV). Both non-x86 ports were tested under qemu-user, not on real hardware. |
 | Accuracy limits | Bessel functions and `lgamma` for negative arguments lose relative accuracy close to their zeros. |
 | Rounding modes | The Ziv-path functions are correctly rounded in all modes. Other libm functions are designed for round-to-nearest; in directed modes they stay within about one ulp. |
-| NaN sign | Invalid operations return the hardware's default NaN: sign bit set on x86, clear on AArch64 (as glibc does on each). The sign of a NaN is unspecified by C. |
+| NaN sign | Invalid operations return the hardware's default NaN: sign bit set on x86, clear on AArch64 and RISC-V (as glibc does on each). The sign of a NaN is unspecified by C. |
 
 ---
 
@@ -567,10 +642,11 @@ documented error.
 | No dependency on the host C library or its headers | Yes. `-nostdinc -ffreestanding` build; the audit verifies no `DT_NEEDED`, no glibc versions, and no undefined references outside the archive. |
 | Own public headers, raw syscall layer, crt objects | Yes: `include/`, `arch/<arch>/internal/syscall_arch.h`, `crt/`. |
 | ARM64 support | AArch64 Linux port (cross-built, tested under qemu; native on ARM64 Linux). macOS is not a possible target; see the port section. |
+| RISC-V support | RISC-V 64 (RV64GC, LP64D) Linux port, cross-built and tested under qemu. |
 | `libc.a`, `libc.so`, `crt1.o`, `crti.o`, `crtn.o` (plus `Scrt1.o`, `rcrt1.o`) | Built by `make`. |
 | Full ISO C; substantial POSIX and Linux | Yes; see [What is implemented](#what-is-implemented). |
 | Own allocator | spfxd-alloc (`src/memory/`). |
-| Optimized string routines (assembly) | x86-64: SSE2 and AVX2, runtime dispatch (`arch/x86_64/src/string/`). AArch64: portable C. |
+| Optimized string routines (assembly) | x86-64: SSE2 and AVX2, runtime dispatch (`arch/x86_64/src/string/`). AArch64: NEON (`arch/aarch64/src/string/`). |
 | stdio with printf/scanf | Exact floating-point formatting, full scanf (`src/stdio/`). |
 | Robust strto* | Correctly rounded in all rounding modes; overflow-safe integer parsing. |
 | qsort | Merge sort with an in-place introsort fallback; O(n log n) worst case. |
@@ -579,9 +655,9 @@ documented error.
 | setjmp, signals | Yes, including `sigsetjmp`/`siglongjmp` and `ucontext`. |
 | pthreads with TLS, atomics | Yes: static and dynamic TLS, `<stdatomic.h>`, C11 threads. |
 | Locales / UTF-8, wide characters | C/POSIX and UTF-8 `LC_CTYPE`; Unicode classification tables. |
-| Automated tests (host libc only as oracle) | `make check`: 69/69 on x86-64; `make ARCH=aarch64 check`: 69/69 under qemu. |
+| Automated tests (host libc only as oracle) | `make check`: 72/72 on x86-64; `make ARCH=aarch64 check`: 72/72 and `make ARCH=riscv64 check`: 71/71 under qemu. |
 | Benchmarks | `make bench`; results above. |
-| Audit with nm/readelf/objdump/ldd | `make audit` and `make ARCH=aarch64 audit`: 35/35 checks pass for each. |
+| Audit with nm/readelf/objdump/ldd | `make audit`, `make ARCH=aarch64 audit` and `make ARCH=riscv64 audit`: 35/35 checks pass for each. |
 | Warnings fixed | The audit's full rebuild has no warnings. |
 | No fake stubs; unsupported parts documented | See the table above. |
 

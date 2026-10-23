@@ -1,0 +1,8 @@
+/*
+ * lib-spfxd — libc.so export list.  Every non-hidden symbol is exported;
+ * internal symbols are hidden at compile time (see src/internal/libc.h).
+ * No symbol versioning is used.
+ */
+{
+	global: *;
+};

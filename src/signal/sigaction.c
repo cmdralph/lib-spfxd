@@ -4,7 +4,9 @@
  * The kernel's struct sigaction has a different layout from the user one
  * (handler, flags, restorer, 64-bit mask).  Every handler gets
  * SA_RESTORER with __restore_rt, the trampoline that performs
- * rt_sigreturn when the handler returns.
+ * rt_sigreturn when the handler returns.  Architectures whose kernel
+ * returns from handlers through its vDSO (ARCH_SIGRETURN_VDSO: RISC-V)
+ * have neither SA_RESTORER nor the restorer field.
  */
 #include <errno.h>
 #include <signal.h>
@@ -14,11 +16,15 @@
 struct k_sigaction {
 	void (*handler)(int);
 	unsigned long flags;
+#ifndef ARCH_SIGRETURN_VDSO
 	void (*restorer)(void);
+#endif
 	unsigned long mask;
 };
 
+#ifndef ARCH_SIGRETURN_VDSO
 hidden void __restore_rt(void);
+#endif
 
 hidden int __libc_sigaction(int sig, const struct sigaction *restrict sa,
 	struct sigaction *restrict old)
@@ -26,8 +32,12 @@ hidden int __libc_sigaction(int sig, const struct sigaction *restrict sa,
 	struct k_sigaction ksa, kold;
 	if (sa) {
 		ksa.handler = sa->sa_handler;
+#ifdef ARCH_SIGRETURN_VDSO
+		ksa.flags = (unsigned long)(unsigned)sa->sa_flags;
+#else
 		ksa.flags = (unsigned long)(unsigned)sa->sa_flags | SA_RESTORER;
 		ksa.restorer = __restore_rt;
+#endif
 		ksa.mask = sa->sa_mask.__bits[0];
 	}
 	long r = __syscall(SYS_rt_sigaction, sig, sa ? &ksa : 0, old ? &kold : 0, 8);
@@ -36,7 +46,9 @@ hidden int __libc_sigaction(int sig, const struct sigaction *restrict sa,
 		memset(old, 0, sizeof *old);
 		old->sa_handler = kold.handler;
 		old->sa_flags = (int)kold.flags;
+#ifndef ARCH_SIGRETURN_VDSO
 		old->sa_restorer = kold.restorer;
+#endif
 		old->sa_mask.__bits[0] = kold.mask;
 	}
 	return 0;

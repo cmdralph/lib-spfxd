@@ -26,11 +26,11 @@
  * allocated for a thread on its first __tls_get_addr for that module.
  * Such modules may not use the initial-exec model (REL_TPOFF).
  *
- * TLS descriptors (REL_TLSDESC, the default dialect on AArch64) resolve
- * to arch resolvers: __tlsdesc_static returns a fixed offset from the
- * thread pointer, __tlsdesc_dynamic goes through __tls_get_addr for
- * modules loaded by dlopen.  x86-64 code uses the traditional dialect;
- * its TLSDESC relocations are not supported.
+ * TLS descriptors (REL_TLSDESC: the default dialect on AArch64,
+ * -mtls-dialect=gnu2 on x86-64) resolve to arch resolvers:
+ * __tlsdesc_static returns a fixed offset from the thread pointer,
+ * __tlsdesc_dynamic reads the dtv, or calls __tls_get_addr, for modules
+ * loaded by dlopen.
  *
  * dlclose never unmaps: objects stay loaded until exit (their destructors
  * run at exit).
@@ -54,6 +54,14 @@
 #include "syscall.h"
 
 #define DYN_CNT 38
+
+/* GOT entries: GLOB_DAT where the architecture has it (RISC-V uses its
+ * plain 64-bit absolute relocation instead) */
+#ifdef REL_GOT
+#define IS_GOT_REL(t) ((t) == REL_GOT)
+#else
+#define IS_GOT_REL(t) 0
+#endif
 #define DT_RELRSZ_ 35
 #define DT_RELR_ 36
 
@@ -372,7 +380,9 @@ static int do_relocs(struct dso *dso, const Elf64_Rela *rel, size_t size)
 		case REL_SYMBOLIC:
 			*where = sv + addend;
 			break;
+#ifdef REL_GOT
 		case REL_GOT:
+#endif
 		case REL_PLT:
 			*where = sv;
 			break;
@@ -402,7 +412,7 @@ static int do_relocs(struct dso *dso, const Elf64_Rela *rel, size_t size)
 			*where = def.dso ? def.dso->tls_id : 0;
 			break;
 		case REL_DTPOFF:
-			*where = (def.sym ? def.sym->st_value : 0) + addend;
+			*where = (def.sym ? def.sym->st_value : 0) + addend - TLS_DTV_OFFSET;
 			break;
 		case REL_TPOFF:
 			if (def.dso && def.dso->dyn_tls) {
@@ -506,7 +516,7 @@ static void redirect_moved(struct dso *p)
 		const Elf64_Rela *r = (const void *)(p->base + off);
 		for (size_t i = 0; i < sz / sizeof *r; i++, r++) {
 			uint32_t type = (uint32_t)ELF64_R_TYPE(r->r_info);
-			if (type != REL_GOT && type != REL_SYMBOLIC) continue;
+			if (!IS_GOT_REL(type) && type != REL_SYMBOLIC) continue;
 			size_t *where = (size_t *)(p->base + r->r_offset);
 			for (size_t k = 0; k < nmoved; k++)
 				if (*where - moved[k].from < moved[k].size || *where == moved[k].from)
@@ -970,8 +980,8 @@ void *__tls_get_addr(size_t *ti)
 {
 	uintptr_t *dtv = __self()->dtv;
 	size_t id = ti[0];
-	if (likely(id <= dtv[0] && dtv[id])) return (char *)dtv[id] + ti[1];
-	return tls_alloc_block(id, ti[1]);
+	if (likely(id <= dtv[0] && dtv[id])) return (char *)dtv[id] + ti[1] + TLS_DTV_OFFSET;
+	return tls_alloc_block(id, ti[1] + TLS_DTV_OFFSET);
 }
 
 /* Free a thread's dynamically allocated TLS blocks (pthread_exit). */
@@ -1440,7 +1450,7 @@ static void *sym_addr(struct symdef def)
 {
 	size_t v = (size_t)def.dso->base + def.sym->st_value;
 	if (ELF64_ST_TYPE(def.sym->st_info) == STT_TLS) {
-		size_t ti[2] = { def.dso->tls_id, def.sym->st_value };
+		size_t ti[2] = { def.dso->tls_id, def.sym->st_value - TLS_DTV_OFFSET };
 		return __tls_get_addr(ti);
 	}
 	if (ELF64_ST_TYPE(def.sym->st_info) == STT_GNU_IFUNC) return (void *)((size_t (*)(void))v)();

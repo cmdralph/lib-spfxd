@@ -41,6 +41,26 @@ static const char *ref_strchrnul(const char *s, int c)
 	while (*s && *s != (char)c) s++;
 	return s;
 }
+static const void *ref_memrchr(const void *s, int c, size_t n)
+{
+	const unsigned char *p = s;
+	while (n--) if (p[n] == (unsigned char)c) return p + n;
+	return 0;
+}
+static int ref_strncmp(const char *a, const char *b, size_t n)
+{
+	for (; n; n--, a++, b++) {
+		if (*a != *b) return (unsigned char)*a - (unsigned char)*b;
+		if (!*a) return 0;
+	}
+	return 0;
+}
+static const char *ref_strrchr(const char *s, int c)
+{
+	const char *r = 0;
+	do if (*s == (char)c) r = s; while (*s++);
+	return r;
+}
 
 #define N 700
 static unsigned char A[N + 128], B[N + 128], C[N + 128];
@@ -98,6 +118,12 @@ int main(void)
 		size_t n = rnd() % (unsigned)(len + 20);
 		CHECK(memchr(s, c, n) == ref_memchr(s, c, n), "memchr len %d n %zu", len, n);
 		CHECK(memchr(s, c, (size_t)-1) == ref_memchr(s, c, (size_t)len + 1) || 1, "memchr huge");
+		CHECK(memrchr(s, c, n) == ref_memrchr(s, c, n), "memrchr len %d n %zu", len, n);
+		CHECK(strrchr(s, c) == ref_strrchr(s, c), "strrchr len %d", len);
+		CHECK(strrchr(s, 0) == s + len, "strrchr nul");
+		CHECK(strnlen(s, n) == (n < (size_t)len ? n : (size_t)len), "strnlen len %d n %zu", len, n);
+		char *e = stpcpy((char *)C + (a ^ 3), s);
+		CHECK(e == (char *)C + (a ^ 3) + len && !strcmp((char *)C + (a ^ 3), s), "stpcpy len %d", len);
 		memcpy(B + (a ^ 5), s, (size_t)len + 1);
 		const char *t = (const char *)B + (a ^ 5);
 		CHECK(strcmp(s, t) == 0, "strcmp eq len %d", len);
@@ -105,6 +131,9 @@ int main(void)
 			int p = (int)(rnd() % (unsigned)len);
 			B[(a ^ 5) + p] = (unsigned char)(rnd() & 255);
 			CHECK(sgn(strcmp(s, t)) == sgn(ref_strcmp(s, t)), "strcmp diff len %d p %d", len, p);
+			size_t k = rnd() % (unsigned)(len + 4);
+			CHECK(sgn(strncmp(s, t, k)) == sgn(ref_strncmp(s, t, k)), "strncmp len %d p %d n %zu", len, p, k);
+			CHECK(strncmp(s, t, (size_t)p) == 0, "strncmp prefix len %d p %d", len, p);
 		}
 	}
 	/* page boundaries: strings ending at the last byte of a page whose
@@ -127,6 +156,33 @@ int main(void)
 		char *u = (char *)m2 + pg - 120;
 		memcpy(u, s, (size_t)len + 1);
 		CHECK(strcmp(s, u) == 0 && strcmp(u, s) == 0, "page strcmp mixed %d", len);
+		volatile size_t huge = (size_t)-1;
+		CHECK(strncmp(s, u, (size_t)len + 50) == 0 && strncmp(u, s, huge) == 0, "page strncmp %d", len);
+		CHECK(strnlen(s, (size_t)len + 100) == (size_t)len, "page strnlen %d", len);
+		CHECK(strrchr(s, '#') == 0 && memrchr(s, '#', (size_t)len) == 0, "page strrchr %d", len);
+		/* copies and fills that end exactly at the boundary */
+		memset(s, 'x', (size_t)len + 1);
+		memcpy(s, t, (size_t)len + 1);
+		memmove(s, s + (len > 0), (size_t)len + (len == 0));
+		memmove((char *)m + pg - len, (char *)m + pg - len - 1, (size_t)len);
+		size_t tl = ref_strlen(t);         /* u above may have shortened t */
+		CHECK(stpcpy(s, t) == s + tl, "page stpcpy %d", len);
+	}
+	/* the page before the buffer is inaccessible: backward scans must
+	 * not read below the start */
+	unsigned char *m3 = mmap(0, (size_t)pg * 2, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	mprotect(m3, (size_t)pg, PROT_NONE);
+	for (int len = 0; len < 100; len++) {
+		unsigned char *b0 = m3 + pg;
+		for (int i = 0; i < len; i++) b0[i] = (unsigned char)('a' + i % 26);
+		CHECK(memrchr(b0, '#', (size_t)len) == 0, "page memrchr %d", len);
+		if (len) {
+			b0[0] = '#';
+			CHECK(memrchr(b0, '#', (size_t)len) == b0, "page memrchr first %d", len);
+		}
+		memmove(b0, b0 + 1, (size_t)len);
+		memmove(b0 + 1, b0, (size_t)len);
+		CHECK(memcmp(b0, b0, (size_t)len) == 0, "page memcmp start %d", len);
 	}
 	/* long operands: strcmp across several pages with unequal page
 	 * offsets, and the 128-byte vector loops of the other functions */
@@ -148,6 +204,8 @@ int main(void)
 			CHECK(strchr(s, 1) == s + q && strchrnul(s, 1) == s + q, "long strchr %d q %d", len, q);
 			CHECK(sgn(strcmp(s, t)) == sgn(ref_strcmp(s, t)), "long strcmp diff %d q %d", len, q);
 			CHECK(sgn(memcmp(s, t, (size_t)len)) == sgn(ref_memcmp(s, t, (size_t)len)), "long memcmp diff %d", len);
+			CHECK(sgn(strncmp(s, t, (size_t)len)) == sgn(ref_strncmp(s, t, (size_t)len)), "long strncmp diff %d", len);
+			CHECK(memrchr(s, 1, (size_t)len) == s + q, "long memrchr %d q %d", len, q);
 			L1[a + q] = L2[b + q];
 		}
 		int n = (int)(rnd() % 2200), sa = (int)(rnd() % 64), da = (int)(rnd() % 64);

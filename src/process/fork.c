@@ -69,6 +69,9 @@ pid_t _Fork(void)
 	long ret = __syscall(SYS_clone, SIGCHLD, 0, 0, 0, 0);
 	if (ret == 0) {
 		self->tid = (int)__syscall(SYS_gettid);
+		/* the kernel does not inherit robust-list registrations */
+		if (self->robust_registered)
+			__syscall(SYS_set_robust_list, &self->robust, 3 * sizeof(long));
 		self->next = self->prev = self;
 		self->detach_state = DT_JOINABLE;
 		__thread_count = 1;

@@ -36,7 +36,11 @@ int pthread_getschedparam(pthread_t th, int *restrict policy, struct sched_param
 
 int pthread_setschedparam(pthread_t th, int policy, const struct sched_param *param)
 {
-	return (int)-__syscall(SYS_sched_setscheduler, ((struct pthread *)th)->tid, policy, param);
+	struct pthread *t = (struct pthread *)th;
+	int r = (int)-__syscall(SYS_sched_setscheduler, t->tid, policy, param);
+	/* a thread holding priority-ceiling mutexes keeps its boost */
+	if (!r) __pthread_pp_rebase(t, policy, param->sched_priority);
+	return r;
 }
 
 int pthread_setschedprio(pthread_t th, int prio)
@@ -44,7 +48,13 @@ int pthread_setschedprio(pthread_t th, int prio)
 	struct sched_param p;
 	memset(&p, 0, sizeof p);
 	p.sched_priority = prio;
-	return (int)-__syscall(SYS_sched_setparam, ((struct pthread *)th)->tid, &p);
+	struct pthread *t = (struct pthread *)th;
+	int r = (int)-__syscall(SYS_sched_setparam, t->tid, &p);
+	if (!r) {
+		long policy = __syscall(SYS_sched_getscheduler, t->tid);
+		if (policy >= 0) __pthread_pp_rebase(t, (int)policy, prio);
+	}
+	return r;
 }
 
 int pthread_getcpuclockid(pthread_t th, clockid_t *clk)

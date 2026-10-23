@@ -6,8 +6,12 @@
  * the start.  Aligned loads never cross a page, so reading the remainder
  * of the last block is safe.
  *
- * AVX2: 32-byte aligned blocks; while at least 128 bytes remain, four
- * blocks are tested at once.
+ * AVX2: 32-byte aligned blocks; from a 128-byte-aligned address on,
+ * while at least 128 bytes remain, four blocks are tested at once.  The
+ * 128-byte groups are aligned so that they never reach into a page the
+ * search would not otherwise touch: memchr must behave as if it read
+ * sequentially and stopped at the first match (C11 7.24.5.1), so callers
+ * such as strnlen may pass an n larger than the readable object.
  */
 #include "cpu.h"
 	.text
@@ -88,7 +92,18 @@ memchr:
 	jbe .La_null
 	sub %r9,%rdx                       /* bytes remaining from rax + 32 */
 	add $32,%rax
-	cmp $128,%rdx
+7:	/* single blocks up to 128-byte alignment */
+	test $96,%al
+	jz 8f
+	vpcmpeqb (%rax),%ymm1,%ymm2
+	vpmovmskb %ymm2,%r8d
+	test %r8d,%r8d
+	jnz 6f
+	sub $32,%rdx
+	jbe .La_null
+	add $32,%rax
+	jmp 7b
+8:	cmp $128,%rdx
 	jb 4f
 	.p2align 4
 2:	vpcmpeqb (%rax),%ymm1,%ymm2

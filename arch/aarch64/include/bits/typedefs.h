@@ -237,14 +237,16 @@ typedef struct {
 	int __detach, __sched_policy, __sched_prio, __inherit, __scope;
 	int __pad[3];
 } pthread_attr_t;
-/* lock word, owner tid, recursion count, type/flags.  40 bytes total. */
+/* lock word, owner tid, recursion count, type/flags, priority ceiling,
+ * robust-list links.  40 bytes total; all-zero is PTHREAD_MUTEX_INITIALIZER. */
 typedef struct {
 	volatile int __lock;
 	int __owner;
 	int __count;
-	int __type;
+	volatile int __type;
 	int __waiters;
-	int __pad[5];
+	int __prio;
+	void *volatile __next, *volatile __prev;
 } pthread_mutex_t;
 typedef struct {
 	volatile unsigned int __seq;

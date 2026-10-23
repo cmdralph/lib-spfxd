@@ -87,12 +87,12 @@ printf '  info  %s exported symbols\n' "$(wc -l <"$TMP/exports")"
 echo "== libc.a"
 ${T}nm -A $L/libc.a 2>/dev/null | awk '$(NF-1)=="U" {print $NF}' | sort -u >"$TMP/und"
 ${T}nm $L/libc.a 2>/dev/null | awk 'NF==3 && $2 ~ /^[TDBRWVGSAtdbrwvgsai]$/ {print $3}' | sort -u >"$TMP/def"
-check "all references resolved within the archive" "comm -23 '$TMP/und' '$TMP/def' | grep -vxE '_GLOBAL_OFFSET_TABLE_|__popcount[sd]i2|__(u?div|u?mod|mul)[st]i3|__(ashl|ashr|lshr)ti3|__[a-z]+[sdtx]f[23]|__(fixuns|fix|floatun|float)[a-z]{2}[a-z]{2}'"
+check "all references resolved within the archive" "comm -23 '$TMP/und' '$TMP/def' | grep -vxE '_GLOBAL_OFFSET_TABLE_|__(popcount|clz|ctz|bswap|ffs|parity)[sd]i2|__(u?div|u?mod|mul)[st]i3|__(ashl|ashr|lshr)ti3|__[a-z]+[sdtx]f[23]|__(fixuns|fix|floatun|float)[a-z]{2}[a-z]{2}'"
 check "no glibc symbol references in objects" "${T}nm $L/libc.a 2>/dev/null | grep -E '@GLIBC|@@GLIBC'"
 
 echo "== crt objects"
 for o in crt1.o Scrt1.o rcrt1.o; do
-	check "$o references only startup symbols" "${T}nm -u $L/$o | awk '{print \$2}' | grep -vxE 'main|__libc_start_main|_init|_fini|_DYNAMIC|_GLOBAL_OFFSET_TABLE_|__(pre)?init_array_(start|end)|__fini_array_(start|end)'"
+	check "$o references only startup symbols" "${T}nm -u $L/$o | awk '{print \$2}' | grep -vxE 'main|__libc_start_main|_init|_fini|_DYNAMIC|_GLOBAL_OFFSET_TABLE_|__global_pointer[\$]|__(pre)?init_array_(start|end)|__fini_array_(start|end)'"
 done
 for o in crti.o crtn.o; do
 	check "$o has no undefined references" "${T}nm -u $L/$o 2>/dev/null"

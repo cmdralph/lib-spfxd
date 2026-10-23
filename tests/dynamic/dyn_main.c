@@ -14,6 +14,10 @@
 extern int dep_counter, dep_order[8], dep_norder, mid_ctor_saw;
 extern int dep_get_tls(void), *dep_tls_addr(void), dep_value(void), mid_value(void);
 extern char **environ;
+#include "tlsdesc_check.h"
+#ifdef TLSDESC_CHECK_SUPPORTED
+extern void *dep_desc_addr(void);
+#endif
 
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
@@ -49,6 +53,20 @@ static void *thr(void *arg)
 	return (void *)(first == 1234 ? 0 : -2L);
 }
 
+#ifdef TLSDESC_CHECK_SUPPORTED
+/* the first descriptor access to the plugin's TLS from a new thread takes
+ * the resolver's slow path (allocation), the second its fast path */
+static void *(*plug_desc)(void);
+static void *plug_handle;
+static void *desc_thr(void *arg)
+{
+	void *a = plug_desc(), *b = plug_desc();
+	void *c = dlsym(plug_handle, "plug_tls");
+	(void)arg;
+	return (void *)(long)(a && a == b && a == c);
+}
+#endif
+
 int main(void)
 {
 	CHECK(dep_norder == 2 && dep_order[0] == 1 && dep_order[1] == 2 && mid_ctor_saw == 1,
@@ -60,6 +78,9 @@ int main(void)
 	CHECK(dep_get_tls() == 62, "library TLS %d", dep_get_tls());
 	*dep_tls_addr() = 8;
 	CHECK(dep_get_tls() == 63, "library TLS write");
+#ifdef TLSDESC_CHECK_SUPPORTED
+	CHECK(dep_desc_addr() == dep_tls_addr(), "TLS descriptor (static resolver): registers and address");
+#endif
 	/* environ copy relocation vs libc's own view */
 	setenv("SPFXD_TEST_VAR", "yes", 1);
 	int found = 0;
@@ -101,6 +122,18 @@ int main(void)
 			CHECK(r == 0, "thread dynamic TLS %d", i);
 		}
 		CHECK(tls_get() == 99, "main TLS unaffected");
+#ifdef TLSDESC_CHECK_SUPPORTED
+		plug_handle = h;
+		plug_desc = (void *(*)(void))dlsym(h, "plug_desc_addr");
+		CHECK(plug_desc && plug_desc() == tp, "TLS descriptor (dynamic resolver, fast path)");
+		for (int i = 0; i < 3; i++) {
+			pthread_t dt;
+			void *ok = 0;
+			pthread_create(&dt, 0, desc_thr, 0);
+			pthread_join(dt, &ok);
+			CHECK(ok == (void *)1, "TLS descriptor (dynamic resolver, slow path) %d", i);
+		}
+#endif
 		void *h2 = dlopen("libplug.so", RTLD_NOW | RTLD_GLOBAL);
 		CHECK(h2 == h, "dlopen same handle");
 		CHECK(dlsym(RTLD_DEFAULT, "plug_tls_get") != 0, "RTLD_GLOBAL promotion");
